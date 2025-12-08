@@ -97,7 +97,6 @@ def create_blob_service_client(credentials: Optional[AzureCredentials] = None) -
     # Priority 2: Account name + key
     if creds.account_name and creds.account_key:
         account_url = creds.endpoint or f"https://{creds.account_name}.blob.core.windows.net"
-        from azure.storage.blob import BlobServiceClient
         return BlobServiceClient(account_url=account_url, credential=creds.account_key)
     
     # Priority 3: Account name + SAS token

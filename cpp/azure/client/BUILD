@@ -7,6 +7,7 @@ cc_library(
         "client.cc",
     ],
     deps = [
+        "@azure//:azure",
         "//common/backend_api/response",
         "//common/backend_api/object_storage",
         "//common/client_mgr",

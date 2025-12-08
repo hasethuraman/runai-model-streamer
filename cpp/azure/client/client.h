@@ -17,9 +17,13 @@
 namespace runai::llm::streamer::impl::azure
 {
 
+// Forward declaration for pimpl idiom
+struct AzureClientImpl;
+
 struct AzureClient : common::IClient
 {
     AzureClient(const common::backend_api::ObjectClientConfig_t& config);
+    ~AzureClient();
 
     // verify that client's credentials have not changed
     bool verify_credentials(const common::backend_api::ObjectClientConfig_t & config) const;
@@ -46,10 +50,14 @@ struct AzureClient : common::IClient
     std::optional<std::string> _account_key;
     std::optional<std::string> _sas_token;
     std::optional<std::string> _endpoint;
+    
+    // Pimpl pointer for Azure SDK client (hides implementation details)
+    std::unique_ptr<AzureClientImpl> _impl;
 
     // queue of asynchronous responses
     using Responder = common::SharedQueue<common::backend_api::Response>;
     std::shared_ptr<Responder> _responder;
+    std::mutex _responder_mutex;  // Protects _responder access
 };
 
 } // namespace runai::llm::streamer::impl::azure

@@ -22,16 +22,24 @@ class AzuriteServer(ObjectStoreBackend):
         while time.time() - start_time < timeout:
             try:
                 # Try to list containers to check connectivity
-                list(self.client.list_containers(max_results=1))
+                containers = self.client.list_containers(results_per_page=1)
+                next(iter(containers), None)  # Consume one item from the iterator
                 print("Azurite server is up and running.")
                 return
-            except (ServiceRequestError, ResourceNotFoundError):
+            except (ServiceRequestError, ResourceNotFoundError, StopIteration):
                 time.sleep(0.5)
         raise TimeoutError(f"Azurite server failed to start within {timeout} seconds.")
 
     def upload_file(self, container_name, directory, file_path):
         """Uploads a local file to the specified Azure container and directory."""
         container_client = self.client.get_container_client(container_name)
+        
+        # Create container if it doesn't exist
+        try:
+            container_client.create_container()
+        except Exception:
+            pass  # Container already exists
+        
         blob_name = os.path.join(directory, os.path.basename(file_path)).replace("\\", "/")
         blob_client = container_client.get_blob_client(blob_name)
         
@@ -44,3 +52,6 @@ TestAzureCompatibility = compatibility_test_cases(
     scheme="azure",
     bucket_name=os.getenv("AZURE_CONTAINER")
 )
+
+if __name__ == "__main__":
+    unittest.main()

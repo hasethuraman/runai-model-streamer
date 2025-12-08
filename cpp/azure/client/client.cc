@@ -4,25 +4,36 @@
 #include <optional>
 #include <vector>
 #include <future>
+#include <mutex>
 #include <memory>
 #include <functional>
 #include <cstring>
+
+#include <azure/storage/blobs.hpp>
+#include <azure/identity/default_azure_credential.hpp>
+#include <azure/core/exception.hpp>
 
 #include "azure/client/client.h"
 #include "common/exception/exception.h"
 #include "utils/logging/logging.h"
 #include "utils/env/env.h"
 
-// Note: This is a template implementation. In a real implementation,
-// you would include Azure SDK headers:
-// #include <azure/storage/blobs.hpp>
-// using namespace Azure::Storage::Blobs;
+using namespace Azure::Storage::Blobs;
 
 namespace runai::llm::streamer::impl::azure
 {
 
+// Implementation struct that holds the Azure SDK client
+struct AzureClientImpl
+{
+    std::shared_ptr<BlobServiceClient> blob_service_client;
+    std::vector<std::future<void>> active_futures;
+    std::mutex futures_mutex;
+};
+
 AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config) :
     _stop(false),
+    _impl(std::make_unique<AzureClientImpl>()),
     _responder(nullptr),
     _chunk_bytesize(config.default_storage_chunk_size)
 {
@@ -108,19 +119,61 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
         LOG(WARNING) << "No Azure credentials provided, attempting to use default Azure credential chain";
     }
 
-    // In a real implementation, initialize Azure Blob Storage client here
-    // Example:
-    // if (_connection_string.has_value()) {
-    //     _blob_service_client = std::make_unique<BlobServiceClient>(
-    //         BlobServiceClient::CreateFromConnectionString(_connection_string.value())
-    //     );
-    // } else if (_account_name.has_value() && _account_key.has_value()) {
-    //     auto credential = std::make_shared<StorageSharedKeyCredential>(
-    //         _account_name.value(), _account_key.value()
-    //     );
-    //     std::string url = _endpoint.value_or("https://" + _account_name.value() + ".blob.core.windows.net");
-    //     _blob_service_client = std::make_unique<BlobServiceClient>(url, credential);
-    // }
+    // Initialize Azure Blob Storage client with options for Azurite compatibility
+    try {
+        BlobClientOptions options;
+        // Use older API version compatible with Azurite (2019-12-12 is well-supported)
+        options.ApiVersion = "2019-12-12";
+
+        LOG(INFO) << "Setting Azure SDK API version to: " << options.ApiVersion;
+
+        if (_connection_string.has_value()) {
+            _impl->blob_service_client = std::make_shared<BlobServiceClient>(
+                BlobServiceClient::CreateFromConnectionString(_connection_string.value(), options)
+            );
+            LOG(DEBUG) << "Azure client initialized with connection string";
+        } else if (_account_name.has_value() && _account_key.has_value()) {
+            auto credential = std::make_shared<Azure::Storage::StorageSharedKeyCredential>(
+                _account_name.value(), _account_key.value()
+            );
+            std::string url = _endpoint.value_or("https://" + _account_name.value() + ".blob.core.windows.net");
+            _impl->blob_service_client = std::make_shared<BlobServiceClient>(url, credential, options);
+            LOG(DEBUG) << "Azure client initialized with account key for " << url;
+        } else if (_account_name.has_value() && _sas_token.has_value()) {
+            std::string url = _endpoint.value_or("https://" + _account_name.value() + ".blob.core.windows.net");
+            url += "?" + _sas_token.value();
+            _impl->blob_service_client = std::make_shared<BlobServiceClient>(url, options);
+            LOG(DEBUG) << "Azure client initialized with SAS token";
+        } else {
+            // Use default Azure credential (managed identity, Azure CLI, etc.)
+            auto credential = std::make_shared<Azure::Identity::DefaultAzureCredential>();
+            std::string url = _endpoint.value_or("https://" + _account_name.value_or("") + ".blob.core.windows.net");
+            _impl->blob_service_client = std::make_shared<BlobServiceClient>(url, credential, options);
+            LOG(DEBUG) << "Azure client initialized with default credential";
+        }
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Failed to initialize Azure client: " << e.what();
+        throw common::Exception(common::ResponseCode::InvalidParameterError);
+    }
+}
+
+AzureClient::~AzureClient()
+{
+    stop();
+
+    // Wait for all async operations to complete
+    // Futures hold shared_ptr to blob_service_client, so it stays alive until all tasks complete
+    std::vector<std::future<void>> futures_to_wait;
+    {
+        std::lock_guard<std::mutex> lock(_impl->futures_mutex);
+        futures_to_wait = std::move(_impl->active_futures);
+    }
+
+    for (auto& future : futures_to_wait) {
+        if (future.valid()) {
+            future.wait();
+        }
+    }
 }
 
 bool AzureClient::verify_credentials(const common::backend_api::ObjectClientConfig_t & config) const
@@ -138,18 +191,24 @@ bool AzureClient::verify_credentials(const common::backend_api::ObjectClientConf
 
 common::backend_api::Response AzureClient::async_read_response()
 {
-    if (_responder == nullptr)
+    std::shared_ptr<Responder> responder;
     {
-        LOG(WARNING) << "Requesting response with uninitialized responder";
-        return common::ResponseCode::FinishedError;
+        std::lock_guard<std::mutex> lock(_responder_mutex);
+        if (_responder == nullptr)
+        {
+            LOG(WARNING) << "Requesting response with uninitialized responder";
+            return common::ResponseCode::FinishedError;
+        }
+        responder = _responder;
     }
 
-    return _responder->pop();
+    return responder->pop();
 }
 
 void AzureClient::stop()
 {
     _stop = true;
+    std::lock_guard<std::mutex> lock(_responder_mutex);
     if (_responder != nullptr)
     {
         _responder->stop();
@@ -161,13 +220,18 @@ common::ResponseCode AzureClient::async_read(const char* path,
                                              char* destination_buffer, 
                                              common::backend_api::ObjectRequestId_t request_id)
 {
-    if (_responder == nullptr)
+    std::shared_ptr<Responder> responder;
     {
-        _responder = std::make_shared<Responder>(1);
-    }
-    else
-    {
-        _responder->increment(1);
+        std::lock_guard<std::mutex> lock(_responder_mutex);
+        if (_responder == nullptr)
+        {
+            _responder = std::make_shared<Responder>(1);
+        }
+        else
+        {
+            _responder->increment(1);
+        }
+        responder = _responder;
     }
 
     char * buffer_ = destination_buffer;
@@ -185,6 +249,8 @@ common::ResponseCode AzureClient::async_read(const char* path,
     std::string container_name(uri.bucket);
     std::string blob_name(uri.path);
 
+    LOG(INFO) << "Azure async_read: path='" << path << "', container='" << container_name << "', blob='" << blob_name << "'";
+
     size_t total_ = range.length;
     size_t offset_ = range.offset;
 
@@ -192,66 +258,113 @@ common::ResponseCode AzureClient::async_read(const char* path,
     {
         size_t bytesize_ = (i == num_chunks - 1 ? total_ : _chunk_bytesize);
 
-        // In a real implementation, use Azure SDK to read blob chunks
-        // This is a placeholder showing the async pattern:
-        //
-        // std::async(std::launch::async, [this, container_name, blob_name, offset_, bytesize_, 
-        //                                  dest_buffer = buffer_, responder = _responder, 
-        //                                  request_id, counter, is_success]() {
-        //     try {
-        //         auto container_client = _blob_service_client->GetBlobContainerClient(container_name);
-        //         auto blob_client = container_client.GetBlockBlobClient(blob_name);
-        //         
-        //         Azure::Storage::Blobs::DownloadBlobToOptions options;
-        //         options.Range = Azure::Core::Http::HttpRange{offset_, bytesize_};
-        //         
-        //         auto response = blob_client.DownloadTo(
-        //             reinterpret_cast<uint8_t*>(dest_buffer), bytesize_, options
-        //         );
-        //         
-        //         if (response.Value.ContentRange.Length.Value() == bytesize_) {
-        //             const auto running = counter->fetch_sub(1);
-        //             LOG(SPAM) << "Async read request " << request_id << " succeeded - " << running << " running";
-        //             
-        //             if (running == 1) {
-        //                 common::backend_api::Response r(request_id, common::ResponseCode::Success);
-        //                 responder->push(std::move(r));
-        //             }
-        //         } else {
-        //             LOG(ERROR) << "Azure blob read size mismatch";
-        //             bool previous = is_success->exchange(false);
-        //             if (previous) {
-        //                 common::backend_api::Response r(request_id, common::ResponseCode::FileAccessError);
-        //                 responder->push(std::move(r));
-        //             }
-        //         }
-        //     } catch (const std::exception& e) {
-        //         LOG(ERROR) << "Failed to read Azure blob: " << e.what();
-        //         bool previous = is_success->exchange(false);
-        //         if (previous) {
-        //             common::backend_api::Response r(request_id, common::ResponseCode::FileAccessError);
-        //             responder->push(std::move(r));
-        //         }
-        //     }
-        // });
+        LOG(INFO) << "Thread " << std::this_thread::get_id() << ": Launching async task for chunk " << i 
+                  << " at offset " << offset_ << " size " << bytesize_ << " to buffer " << (void*)buffer_;
 
-        // Temporary placeholder: immediately send success response
-        // In real implementation, this would be done by the async lambda above
-        LOG(DEBUG) << "Azure read request: container=" << container_name 
-                   << " blob=" << blob_name 
-                   << " offset=" << offset_ 
-                   << " size=" << bytesize_;
+        // Launch async task using std::async (Azure SDK clients are thread-safe)
+        // Note: future is moved into a detached state after creation to avoid destructor issues
+        auto future = std::async(std::launch::async, [
+            blob_service_client = _impl->blob_service_client,  // Capture shared_ptr to keep it alive
+            container_name,
+            blob_name,
+            buffer_,
+            bytesize_,
+            offset_,
+            request_id,
+            counter,
+            is_success,
+            responder,
+            chunk_index = i
+        ]() {
+            try {
+                LOG(INFO) << "Thread " << std::this_thread::get_id() << ": Chunk " << chunk_index 
+                          << " - Getting container client for: " << container_name;
+                auto container_client = blob_service_client->GetBlobContainerClient(container_name);
+                
+                LOG(INFO) << "Thread " << std::this_thread::get_id() << ": Chunk " << chunk_index 
+                          << " - Getting blob client for: " << blob_name;
+                auto blob_client = container_client.GetBlockBlobClient(blob_name);
+                    
+                LOG(INFO) << "Thread " << std::this_thread::get_id() << ": Chunk " << chunk_index 
+                          << " - Setting up download options";
+                DownloadBlobToOptions download_options;
+                download_options.Range = Azure::Core::Http::HttpRange();
+                download_options.Range.Value().Offset = offset_;
+                download_options.Range.Value().Length = bytesize_;
+
+                LOG(INFO) << "Thread " << std::this_thread::get_id() << ": Chunk " << chunk_index 
+                          << " - Calling DownloadTo at offset " << offset_ << " size " << bytesize_;
+                
+                auto response = blob_client.DownloadTo(
+                    reinterpret_cast<uint8_t*>(buffer_), bytesize_, download_options
+                );
+                
+                LOG(INFO) << "Thread " << std::this_thread::get_id() << ": Chunk " << chunk_index 
+                          << " - DownloadTo completed successfully";
+                
+                LOG(INFO) << "Thread " << std::this_thread::get_id() << ": Chunk " << chunk_index 
+                          << " - Checking response ContentRange...";
+                if (response.Value.ContentRange.Length.HasValue()) {
+                    LOG(INFO) << "Thread " << std::this_thread::get_id() << ": Chunk " << chunk_index 
+                              << " - ContentRange.Length = " << response.Value.ContentRange.Length.Value();
+                } else {
+                    LOG(WARNING) << "Thread " << std::this_thread::get_id() << ": Chunk " << chunk_index 
+                                 << " - ContentRange.Length does not have a value";
+                }
+                
+                if (response.Value.ContentRange.Length.HasValue() && 
+                    response.Value.ContentRange.Length.Value() == bytesize_) {
+                    const auto running = counter->fetch_sub(1);
+                    LOG(INFO) << "Thread " << std::this_thread::get_id() << ": Chunk " << chunk_index 
+                              << " - Read request " << request_id << " succeeded - " << running << " remaining";
+                    
+                    if (running == 1) {
+                        LOG(INFO) << "Thread " << std::this_thread::get_id() 
+                                  << ": All chunks complete for request " << request_id;
+                        common::backend_api::Response r(request_id, common::ResponseCode::Success);
+                        responder->push(std::move(r));
+                    }
+                } else {
+                    LOG(ERROR) << "Thread " << std::this_thread::get_id() << ": Chunk " << chunk_index 
+                               << " - Azure blob read size mismatch";
+                    bool previous = is_success->exchange(false);
+                    if (previous) {
+                        common::backend_api::Response r(request_id, common::ResponseCode::FileAccessError);
+                        responder->push(std::move(r));
+                    }
+                }
+            } catch (const Azure::Core::RequestFailedException& e) {
+                LOG(ERROR) << "Thread " << std::this_thread::get_id() << ": Chunk " << chunk_index 
+                           << " - Azure blob read request failed: " << e.what()
+                           << " | Status: " << static_cast<int>(e.StatusCode)
+                           << " | Reason: " << e.ReasonPhrase
+                           << " | Error Code: " << e.ErrorCode;
+                bool previous = is_success->exchange(false);
+                if (previous) {
+                    common::backend_api::Response r(request_id, common::ResponseCode::FileAccessError);
+                    responder->push(std::move(r));
+                }
+            } catch (const std::exception& e) {
+                LOG(ERROR) << "Thread " << std::this_thread::get_id() << ": Chunk " << chunk_index 
+                           << " - Failed to read Azure blob: " << e.what();
+                bool previous = is_success->exchange(false);
+                if (previous) {
+                    common::backend_api::Response r(request_id, common::ResponseCode::FileAccessError);
+                    responder->push(std::move(r));
+                }
+            }
+        });
+
+        // Store the future to prevent blocking on destruction
+        // (std::async futures block in destructor if not stored)
+        {
+            std::lock_guard<std::mutex> lock(_impl->futures_mutex);
+            _impl->active_futures.push_back(std::move(future));
+        }
         
         total_ -= bytesize_;
         offset_ += bytesize_;
         buffer_ += bytesize_;
-    }
-
-    // Temporary: send immediate success for placeholder implementation
-    if (!_stop)
-    {
-        common::backend_api::Response r(request_id, common::ResponseCode::Success);
-        _responder->push(std::move(r));
     }
 
     return _stop ? common::ResponseCode::FinishedError : common::ResponseCode::Success;

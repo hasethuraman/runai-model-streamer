@@ -172,14 +172,14 @@ common::backend_api::ResponseCode_t obj_wait_for_completions(common::backend_api
     for (unsigned int i = 0; i < max_events_to_retrieve; ++i)
     {
         auto response = client->async_read_response();
-        if (response.error() == common::ResponseCode::Success)
+        if (response.ret == common::ResponseCode::Success)
         {
-            event_buffer[i].request_id = response.request_id();
-            event_buffer[i].response_code = response.error();
+            event_buffer[i].request_id = response.handle;
+            event_buffer[i].response_code = response.ret;
             event_buffer[i].bytes_transferred = 0; // Set by the caller based on request
             (*out_num_events_retrieved)++;
         }
-        else if (response.error() == common::ResponseCode::FinishedError)
+        else if (response.ret == common::ResponseCode::FinishedError)
         {
             // No more events available
             break;
@@ -187,8 +187,8 @@ common::backend_api::ResponseCode_t obj_wait_for_completions(common::backend_api
         else
         {
             // Error occurred
-            event_buffer[i].request_id = response.request_id();
-            event_buffer[i].response_code = response.error();
+            event_buffer[i].request_id = response.handle;
+            event_buffer[i].response_code = response.ret;
             event_buffer[i].bytes_transferred = 0;
             (*out_num_events_retrieved)++;
         }
