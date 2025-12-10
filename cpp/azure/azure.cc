@@ -74,7 +74,10 @@ common::backend_api::ResponseCode_t obj_create_client(common::backend_api::Objec
     common::ResponseCode ret = common::ResponseCode::Success;
     try
     {
-        *out_client_handle = AzureClientMgr::pop(*client_initial_config);
+        // IMPORTANT: Do NOT reuse Azure clients! Create a fresh client each time.
+        // The responder (SharedQueue) in AzureClient is not designed for concurrent pop() calls.
+        // If multiple workload threads reuse the same client, they'll call pop() simultaneously causing crashes.
+        *out_client_handle = new AzureClient(*client_initial_config);
     }
     catch(const common::Exception & e)
     {
@@ -97,7 +100,8 @@ common::backend_api::ResponseCode_t obj_remove_client(common::backend_api::Objec
     {
         if (client_handle)
         {
-            AzureClientMgr::push(static_cast<AzureClient *>(client_handle));
+            // Since we're not reusing clients, just delete it
+            delete static_cast<AzureClient *>(client_handle);
         }
     }
     catch(const std::exception & e)

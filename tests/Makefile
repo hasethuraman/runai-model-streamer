@@ -52,8 +52,7 @@ azure:
 	kill $$AZURITE_PID; \
 	wait $$AZURITE_PID 2>/dev/null || true; \
 	echo ""; \
-	echo "=== C++ Logs from /tmp/azure_cpp.log ==="; \
-	cat /tmp/azure_cpp.log 2>/dev/null || echo "No C++ log file found"; \
+	echo "=== Azur C++ Logs are stored in /tmp/azure_cpp.log ==="; \
 	rm -rf /tmp/azurite
 
 fuzzing:
