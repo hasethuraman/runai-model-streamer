@@ -176,25 +176,17 @@ common::backend_api::ResponseCode_t obj_wait_for_completions(common::backend_api
     for (unsigned int i = 0; i < max_events_to_retrieve; ++i)
     {
         auto response = client->async_read_response();
-        if (response.ret == common::ResponseCode::Success)
+        
+        // Always store the response in the event buffer (matching S3/GCS behavior)
+        event_buffer[i].request_id = response.handle;
+        event_buffer[i].response_code = response.ret;
+        event_buffer[i].bytes_transferred = 0;
+        (*out_num_events_retrieved)++;
+        
+        // Break after storing FinishedError so caller can see it
+        if (response.ret == common::ResponseCode::FinishedError)
         {
-            event_buffer[i].request_id = response.handle;
-            event_buffer[i].response_code = response.ret;
-            event_buffer[i].bytes_transferred = 0; // Set by the caller based on request
-            (*out_num_events_retrieved)++;
-        }
-        else if (response.ret == common::ResponseCode::FinishedError)
-        {
-            // No more events available
             break;
-        }
-        else
-        {
-            // Error occurred
-            event_buffer[i].request_id = response.handle;
-            event_buffer[i].response_code = response.ret;
-            event_buffer[i].bytes_transferred = 0;
-            (*out_num_events_retrieved)++;
         }
 
         // For non-blocking mode, exit after first attempt

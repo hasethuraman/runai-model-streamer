@@ -184,9 +184,7 @@ void Workload::wait_for_responses(std::atomic<bool> & stopped)
 
     // wait for responses from the reader
     // stopped flag was propagated to the storage backend when the request was made, and the storage backend is responsible for returning FinishedError when stopped flag is set
-    size_t responses_received = 0;
-    
-    while (responses_received < _total_tasks)
+    while (true)
     {
         std::vector<common::backend_api::Response> responses;
         auto r = _reader->async_response(responses, 1);
@@ -194,12 +192,6 @@ void Workload::wait_for_responses(std::atomic<bool> & stopped)
         {
             LOG(DEBUG) << "FinishedError while waiting for responses";
             throw common::Exception(common::ResponseCode::FinishedError);
-        }
-
-        if (responses.empty())
-        {
-            LOG(DEBUG) << "No responses received, continuing";
-            continue;
         }
 
         const auto & response = responses.back();
@@ -227,9 +219,6 @@ void Workload::wait_for_responses(std::atomic<bool> & stopped)
         }
 
         batch.handle_response(response, task_ptr);
-        
-        responses_received++;
-        LOG(DEBUG) << "Task response received, " << responses_received << "/" << _total_tasks << " tasks done";
     }
 
     LOG(DEBUG) << "Finished reading files "  << (stopped ? " - terminated" : " successfully");
