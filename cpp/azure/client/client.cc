@@ -122,8 +122,8 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
     // Initialize Azure Blob Storage client with options for Azurite compatibility
     try {
         BlobClientOptions options;
-        // Use older API version compatible with Azurite (2019-12-12 is well-supported)
-        options.ApiVersion = "2019-12-12";
+        // Use API version 2023-11-03 which is supported by both Azure and Azurite
+        options.ApiVersion = "2023-11-03";
 
         LOG(INFO) << "Setting Azure SDK API version to: " << options.ApiVersion;
 
