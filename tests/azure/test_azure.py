@@ -35,10 +35,8 @@ class AzuriteServer(ObjectStoreBackend):
         container_client = self.client.get_container_client(container_name)
         
         # Create container if it doesn't exist
-        try:
+        if not container_client.exists():
             container_client.create_container()
-        except Exception:
-            pass  # Container already exists
         
         blob_name = os.path.join(directory, os.path.basename(file_path)).replace("\\", "/")
         blob_client = container_client.get_blob_client(blob_name)
@@ -49,7 +47,7 @@ class AzuriteServer(ObjectStoreBackend):
 
 TestAzureCompatibility = compatibility_test_cases(
     backend_class=AzuriteServer,
-    scheme="azure",
+    scheme="az",
     bucket_name=os.getenv("AZURE_CONTAINER")
 )
 

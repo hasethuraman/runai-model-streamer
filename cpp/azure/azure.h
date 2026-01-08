@@ -6,19 +6,28 @@
 
 // For connecting to Azure Blob Storage:
 //
-// 1. Uri should be in the format azure://container/path or https://account.blob.core.windows.net/container/path
+// 1. Uri should be in the format az://container/path or https://account.blob.core.windows.net/container/path
 //
-// 2. Credentials can be provided via:
+// 2. Credentials can be provided in multiple ways:
+//
+//    Option 1 - Environment variables:
 //    - Connection string: AZURE_STORAGE_CONNECTION_STRING
-//    - Account name and key: AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_ACCOUNT_KEY
 //    - SAS token: AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_SAS_TOKEN
-//    - Managed Identity: Use default Azure credential chain
 //
-// 3. Optional: Set custom endpoint with AZURE_STORAGE_ENDPOINT
+//    Option 2 - DefaultAzureCredential (fallback when only AZURE_STORAGE_ACCOUNT_NAME is provided):
+//    - Tries multiple authentication methods in order: environment variables, managed identity, Azure CLI, etc.
+//    - Set AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET for service principal
+//    - Or use managed identity (no env vars needed)
+//    - Or authenticate via: az login, Connect-AzAccount, or azd auth login
+//
+// 3. Optional configuration:
+//    - Custom endpoint: AZURE_STORAGE_ENDPOINT or "endpoint" param
+//    - API version: AZURE_STORAGE_API_VERSION (default: "2023-11-03")
 //
 // Example usage:
-// azure:   AZURE_STORAGE_CONNECTION_STRING="..." <streamer app> azure://container/path
-// azure:   AZURE_STORAGE_ACCOUNT_NAME="account" AZURE_STORAGE_ACCOUNT_KEY="key" <streamer app> azure://container/path
+// env vars:  AZURE_STORAGE_CONNECTION_STRING="..." <streamer app> az://container/path
+// managed:   AZURE_STORAGE_ACCOUNT_NAME="account" <streamer app> az://container/path  # uses DefaultAzureCredential
+// programmatic: Pass credentials in ObjectClientConfig_t.initial_params
 
 namespace runai::llm::streamer::impl::azure
 {

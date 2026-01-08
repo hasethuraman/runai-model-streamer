@@ -137,6 +137,79 @@ The session token shoud be passed as an environment variable `AWS_SESSION_TOKEN`
 
 To check if IAM role assumption is needed run `aws s3 ls s3://your-bucket-name --region your-region`. If you get a `403 Forbidden` error, you might need an assumed role
 
+#### Streaming from Azure Blob Storage
+
+> **Note:** Streaming models from Azure Blob Storage requires the installation of the streamer Azure package, as can be found [here](#azureCapabilityInstallation).
+
+To load tensors from Azure Blob Storage, replace the file path in the code above with your Azure path, e.g.:
+
+```python
+file_path = "az://my-container/my/file/path.safetensors"
+```
+
+Or use the full HTTPS URL:
+
+```python
+file_path = "https://myaccount.blob.core.windows.net/my-container/my/file/path.safetensors"
+```
+
+##### Azure Authentication
+
+The streamer supports multiple authentication methods for Azure Blob Storage:
+
+###### Connection String (Recommended for Development)
+
+Set the `AZURE_STORAGE_CONNECTION_STRING` environment variable:
+
+```bash
+export AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=...;EndpointSuffix=core.windows.net"
+```
+
+###### SAS Token
+
+Set the account name and SAS token as environment variables:
+
+```bash
+export AZURE_STORAGE_ACCOUNT_NAME="myaccount"
+export AZURE_STORAGE_SAS_TOKEN="sv=2021-06-08&ss=b&srt=sco&sp=r..."
+```
+
+###### Default Azure Credential (Recommended for Production)
+
+The Default Azure Credential chain tries multiple authentication methods in order:
+- Environment variables (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET`)
+- Managed Identity (no configuration needed when running in Azure)
+- Azure CLI (`az login`)
+- Azure PowerShell (`Connect-AzAccount`)
+- Azure Developer CLI (`azd auth login`)
+
+To use default credentials, set only the account name:
+
+```bash
+export AZURE_STORAGE_ACCOUNT_NAME="myaccount"
+```
+
+See [DefaultAzureCredential](https://learn.microsoft.com/en-us/dotnet/azure/sdk/authentication#defaultazurecredential) for more information.
+
+###### Custom Endpoint
+
+For Azure Storage emulators (like Azurite) or custom endpoints:
+
+```bash
+export AZURE_STORAGE_ENDPOINT="http://127.0.0.1:10000/devstoreaccount1"
+export AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=...;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
+```
+
+###### API Version
+
+To specify a custom Azure Storage API version:
+
+```bash
+export AZURE_STORAGE_API_VERSION="2023-11-03"
+```
+
+Default is `2023-11-03`, which is compatible with both Azure and Azurite.
+
 #### Streaming from Google cloud storage
 
 ##### SDK Authentication
