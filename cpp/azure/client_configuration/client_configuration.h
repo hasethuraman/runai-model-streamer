@@ -3,9 +3,6 @@
 #include <string>
 #include <optional>
 
-// Note: In a real implementation, you would include Azure SDK headers:
-// #include <azure/storage/blobs.hpp>
-
 namespace runai::llm::streamer::impl::azure
 {
 
@@ -14,7 +11,6 @@ struct ClientConfiguration
     // Azure client configuration options
     std::optional<std::string> connection_string;
     std::optional<std::string> account_name;
-    std::optional<std::string> account_key;
     std::optional<std::string> sas_token;
     std::optional<std::string> endpoint_url;
     

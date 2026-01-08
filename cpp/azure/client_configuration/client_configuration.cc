@@ -25,12 +25,6 @@ ClientConfiguration::ClientConfiguration()
         account_name = acct_name;
     }
 
-    const auto acct_key = utils::getenv<std::string>("AZURE_STORAGE_ACCOUNT_KEY", "");
-    if (!acct_key.empty()) {
-        LOG(DEBUG) << "Using AZURE_STORAGE_ACCOUNT_KEY for authentication";
-        account_key = acct_key;
-    }
-
     const auto sas = utils::getenv<std::string>("AZURE_STORAGE_SAS_TOKEN", "");
     if (!sas.empty()) {
         LOG(DEBUG) << "Using AZURE_STORAGE_SAS_TOKEN for authentication";

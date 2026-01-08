@@ -18,6 +18,7 @@ cc_library(
         "//utils/logging",
         "//utils/env",
         "//azure/client_configuration",
+        "//azure/client/async_azure_client",
     ],
     visibility = ["//visibility:public"],
 )
