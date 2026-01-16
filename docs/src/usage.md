@@ -155,49 +155,52 @@ file_path = "https://myaccount.blob.core.windows.net/my-container/my/file/path.s
 
 ##### Azure Authentication
 
-The streamer supports multiple authentication methods for Azure Blob Storage:
+The streamer uses Azure's DefaultAzureCredential for authentication, which provides a seamless authentication experience across development and production environments.
 
-###### Connection String (Recommended for Development)
+###### Default Azure Credential (Recommended)
 
-Set the `AZURE_STORAGE_CONNECTION_STRING` environment variable:
-
-```bash
-export AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=...;EndpointSuffix=core.windows.net"
-```
-
-###### SAS Token
-
-Set the account name and SAS token as environment variables:
-
-```bash
-export AZURE_STORAGE_ACCOUNT_NAME="myaccount"
-export AZURE_STORAGE_SAS_TOKEN="sv=2021-06-08&ss=b&srt=sco&sp=r..."
-```
-
-###### Default Azure Credential (Recommended for Production)
-
-The Default Azure Credential chain tries multiple authentication methods in order:
-- Environment variables (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET`)
-- Managed Identity (no configuration needed when running in Azure)
-- Azure CLI (`az login`)
-- Azure PowerShell (`Connect-AzAccount`)
-- Azure Developer CLI (`azd auth login`)
-
-To use default credentials, set only the account name:
+Set the storage account name and DefaultAzureCredential handles authentication automatically:
 
 ```bash
 export AZURE_STORAGE_ACCOUNT_NAME="myaccount"
 ```
+
+The DefaultAzureCredential chain tries multiple authentication methods in order:
+1. **Environment variables** (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET`) - for service principal authentication
+2. **Managed Identity** - no configuration needed when running in Azure (VMs, AKS, App Service, etc.)
+3. **Azure CLI** - authenticate via `az login`
+4. **Azure PowerShell** - authenticate via `Connect-AzAccount`
+5. **Azure Developer CLI** - authenticate via `azd auth login`
 
 See [DefaultAzureCredential](https://learn.microsoft.com/en-us/dotnet/azure/sdk/authentication#defaultazurecredential) for more information.
+
+###### Service Principal Authentication
+
+For automated pipelines and CI/CD, use service principal credentials:
+
+```bash
+export AZURE_STORAGE_ACCOUNT_NAME="myaccount"
+export AZURE_CLIENT_ID="your-client-id"
+export AZURE_TENANT_ID="your-tenant-id"
+export AZURE_CLIENT_SECRET="your-client-secret"
+```
+
+###### Managed Identity
+
+When running in Azure (VMs, AKS, Azure Functions, etc.), managed identity is used automatically:
+
+```bash
+export AZURE_STORAGE_ACCOUNT_NAME="myaccount"
+# No additional configuration needed - managed identity is detected automatically
+```
 
 ###### Custom Endpoint
 
 For Azure Storage emulators (like Azurite) or custom endpoints:
 
 ```bash
+export AZURE_STORAGE_ACCOUNT_NAME="devstoreaccount1"
 export AZURE_STORAGE_ENDPOINT="http://127.0.0.1:10000/devstoreaccount1"
-export AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=...;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
 ```
 
 ###### API Version

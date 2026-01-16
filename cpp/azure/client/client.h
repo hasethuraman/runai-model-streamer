@@ -44,10 +44,8 @@ struct AzureClient : common::IClient
     ClientConfiguration _client_config;
     const size_t _chunk_bytesize;
     
-    // Azure credentials
-    std::optional<std::string> _connection_string;
+    // Azure credentials (uses DefaultAzureCredential)
     std::optional<std::string> _account_name;
-    std::optional<std::string> _sas_token;
     std::optional<std::string> _endpoint;
     
     // Azure Blob Storage client and async wrapper

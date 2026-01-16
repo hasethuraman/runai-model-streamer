@@ -45,16 +45,19 @@ gcs:
 	rm -rf ${FAKE_GCS_SERVER_ROOT}
 
 azure:
-	@echo "Starting Azurite server on port ${AZURITE_API_PORT}"; \
+# Developer note: To enable C++ debug logging, add these env vars to the pytest command:
+#   RUNAI_STREAMER_LOG_LEVEL=DEBUG RUNAI_STREAMER_LOG_FILE=/tmp/azure_cpp.log
+# Build Azure library with AZURITE_TESTING flag enabled
+	@echo "Building Azure library with Azurite testing support..."; \
+	make -C ../cpp build_azure_test; \
+	echo "Starting Azurite server on port ${AZURITE_API_PORT}"; \
 	azurite --silent --skipApiVersionCheck --location ${AZURITE_SERVER_WORKSPACE} --blobPort ${AZURITE_API_PORT} & \
 	AZURITE_PID=$$!; \
 	echo "Azurite PID is $$AZURITE_PID"; \
-	AZURE_STORAGE_API_VERSION=2019-12-12 RUNAI_STREAMER_LOG_LEVEL=INFO RUNAI_STREAMER_LOG_FILE=/tmp/azure_cpp.log AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=${AZURITE_ACCOUNT_NAME};AccountKey=${AZURITE_ACCOUNT_KEY};BlobEndpoint=http://127.0.0.1:${AZURITE_API_PORT}/${AZURITE_ACCOUNT_NAME};" AZURE_CONTAINER=${AZURITE_CONTAINER} pytest -v azure/ 2>&1 | tee /tmp/azure_test.log; \
+	LD_LIBRARY_PATH="../cpp/bazel-bin/azure:$${LD_LIBRARY_PATH}" AZURE_STORAGE_ACCOUNT_NAME=${AZURITE_ACCOUNT_NAME} AZURE_STORAGE_ACCOUNT_KEY=${AZURITE_ACCOUNT_KEY} AZURE_STORAGE_ENDPOINT="http://127.0.0.1:${AZURITE_API_PORT}/${AZURITE_ACCOUNT_NAME}" AZURE_STORAGE_API_VERSION=2019-12-12 AZURE_CONTAINER=${AZURITE_CONTAINER} pytest -v azure/ 2>&1 | tee /tmp/azure_test.log; \
 	echo "Stopping Azurite..."; \
 	kill $$AZURITE_PID; \
 	wait $$AZURITE_PID 2>/dev/null || true; \
-	echo ""; \
-	echo "=== Azure C++ Logs are stored in /tmp/azure_cpp.log ==="; \
 	rm -rf ${AZURITE_SERVER_WORKSPACE}
 
 fuzzing:

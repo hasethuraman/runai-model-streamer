@@ -8,25 +8,22 @@
 //
 // 1. Uri should be in the format az://container/path or https://account.blob.core.windows.net/container/path
 //
-// 2. Credentials can be provided in multiple ways:
-//
-//    Option 1 - Environment variables:
-//    - Connection string: AZURE_STORAGE_CONNECTION_STRING
-//    - SAS token: AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_SAS_TOKEN
-//
-//    Option 2 - DefaultAzureCredential (fallback when only AZURE_STORAGE_ACCOUNT_NAME is provided):
-//    - Tries multiple authentication methods in order: environment variables, managed identity, Azure CLI, etc.
-//    - Set AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET for service principal
-//    - Or use managed identity (no env vars needed)
-//    - Or authenticate via: az login, Connect-AzAccount, or azd auth login
+// 2. Authentication using DefaultAzureCredential:
+//    - Set AZURE_STORAGE_ACCOUNT_NAME environment variable
+//    - DefaultAzureCredential tries multiple authentication methods in order:
+//      * Environment variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET) for service principal
+//      * Managed Identity (no env vars needed when running in Azure)
+//      * Azure CLI (az login)
+//      * Azure PowerShell (Connect-AzAccount)
+//      * Azure Developer CLI (azd auth login)
 //
 // 3. Optional configuration:
-//    - Custom endpoint: AZURE_STORAGE_ENDPOINT or "endpoint" param
+//    - Custom endpoint: AZURE_STORAGE_ENDPOINT (for Azurite/emulators)
 //    - API version: AZURE_STORAGE_API_VERSION (default: "2023-11-03")
 //
 // Example usage:
-// env vars:  AZURE_STORAGE_CONNECTION_STRING="..." <streamer app> az://container/path
-// managed:   AZURE_STORAGE_ACCOUNT_NAME="account" <streamer app> az://container/path  # uses DefaultAzureCredential
+// managed:   AZURE_STORAGE_ACCOUNT_NAME="account" <streamer app> az://container/path
+// azurite:   AZURE_STORAGE_ACCOUNT_NAME="devstoreaccount1" AZURE_STORAGE_ENDPOINT="http://127.0.0.1:10000/devstoreaccount1" <streamer app> az://container/path
 // programmatic: Pass credentials in ObjectClientConfig_t.initial_params
 
 namespace runai::llm::streamer::impl::azure

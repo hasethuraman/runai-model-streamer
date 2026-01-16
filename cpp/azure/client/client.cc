@@ -29,10 +29,7 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
     _chunk_bytesize(config.default_storage_chunk_size)
 {
     // ClientConfiguration reads environment variables
-    // Override with explicit parameters if provided
-    _connection_string = _client_config.connection_string;
     _account_name = _client_config.account_name;
-    _sas_token = _client_config.sas_token;
     _endpoint = _client_config.endpoint_url;
 
     // Parse configuration parameters from API (overrides environment)
@@ -44,17 +41,9 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
             const char* key = ptr->key;
             const char* value = ptr->value;
             
-            if (strcmp(key, "connection_string") == 0)
-            {
-                _connection_string = std::string(value);
-            }
-            else if (strcmp(key, "account_name") == 0)
+            if (strcmp(key, "account_name") == 0)
             {
                 _account_name = std::string(value);
-            }
-            else if (strcmp(key, "sas_token") == 0)
-            {
-                _sas_token = std::string(value);
             }
             else if (strcmp(key, "endpoint") == 0)
             {
@@ -93,26 +82,28 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
                    << ", retry_delay_ms=" << _client_config.retry_delay_ms
                    << ", concurrency=" << _client_config.max_concurrency;
 
-        if (_connection_string.has_value()) {
-            _blob_service_client = std::make_shared<BlobServiceClient>(
-                BlobServiceClient::CreateFromConnectionString(_connection_string.value(), options)
-            );
-            LOG(DEBUG) << "Azure client initialized with connection string";
-        } else if (_account_name.has_value() && _sas_token.has_value()) {
-            std::string url = _endpoint.value_or("https://" + _account_name.value() + ".blob.core.windows.net");
-            url += "?" + _sas_token.value();
-            _blob_service_client = std::make_shared<BlobServiceClient>(url, options);
-            LOG(DEBUG) << "Azure client initialized with SAS token";
-        } else if (_account_name.has_value()){
-            // Use default Azure credential (managed identity, Azure CLI, etc.)
-            auto credential = std::make_shared<Azure::Identity::DefaultAzureCredential>();
-            std::string url = _endpoint.value_or("https://" + _account_name.value_or("") + ".blob.core.windows.net");
-            _blob_service_client = std::make_shared<BlobServiceClient>(url, credential, options);
-            LOG(DEBUG) << "Azure client initialized with default credential";
-        } else {
-            // raise error if no credentials provided
-            LOG(ERROR) << "No valid Azure credentials provided";
+        if (!_account_name.has_value()) {
+            LOG(ERROR) << "Azure account name is required. Set AZURE_STORAGE_ACCOUNT_NAME environment variable.";
             throw common::Exception(common::ResponseCode::InvalidParameterError);
+        }
+
+        std::string url = _endpoint.value_or("https://" + _account_name.value() + ".blob.core.windows.net");
+        
+#ifdef AZURITE_TESTING
+        // Check if account key is provided (for Azurite/local testing only)
+        if (_client_config.account_key.has_value()) {
+            auto credential = std::make_shared<Azure::Storage::StorageSharedKeyCredential>(
+                _account_name.value(), _client_config.account_key.value());
+            _blob_service_client = std::make_shared<BlobServiceClient>(url, credential, options);
+            LOG(DEBUG) << "Azure client initialized with StorageSharedKeyCredential for account: " << _account_name.value();
+        } else
+#endif
+        {
+            // Use DefaultAzureCredential (managed identity, Azure CLI, environment variables, etc.)
+            // Reference: https://learn.microsoft.com/en-us/azure/developer/cpp/sdk/authentication
+            auto credential = std::make_shared<Azure::Identity::DefaultAzureCredential>();
+            _blob_service_client = std::make_shared<BlobServiceClient>(url, credential, options);
+            LOG(DEBUG) << "Azure client initialized with DefaultAzureCredential for account: " << _account_name.value();
         }
         
         // Create async client with ThreadPool
@@ -136,9 +127,7 @@ bool AzureClient::verify_credentials(const common::backend_api::ObjectClientConf
     // Compare stored credentials with new config
     AzureClient temp_client(config);
     
-    return (_connection_string == temp_client._connection_string &&
-            _account_name == temp_client._account_name &&
-            _sas_token == temp_client._sas_token &&
+    return (_account_name == temp_client._account_name &&
             _endpoint == temp_client._endpoint);
 }
 

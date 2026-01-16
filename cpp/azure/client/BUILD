@@ -6,6 +6,10 @@ cc_library(
     srcs = [
         "client.cc",
     ],
+    defines = select({
+        "//:azurite_testing": ["AZURITE_TESTING"],
+        "//conditions:default": [],
+    }),
     deps = [
         "@azure//:azure",
         "//common/backend_api/response",
