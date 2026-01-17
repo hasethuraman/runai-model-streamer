@@ -34,9 +34,9 @@ if __name__ == "__main__":
 from runai_model_streamer import SafetensorsStreamer
 
 # Configuration - Update these with your Azure details
-AZURE_STORAGE_ACCOUNT = 'testrunai'
-AZURE_CONTAINER = 'runai'
-AZURE_BLOB_PATH = 'DD-vector-v2.safetensors'  # e.g., 'models/model.safetensors'
+AZURE_STORAGE_ACCOUNT = 'runaisa'
+AZURE_CONTAINER = 'qwen'
+AZURE_BLOB_PATH = 'Qwen3-0.6B/model.safetensors'  # e.g., 'models/model.safetensors'
 
 # Azure credentials (or set these as environment variables)
 # os.environ['AZURE_STORAGE_ACCOUNT_NAME'] = 'your-storage-account'
@@ -44,7 +44,7 @@ AZURE_BLOB_PATH = 'DD-vector-v2.safetensors'  # e.g., 'models/model.safetensors'
 # Or use SAS token:
 # os.environ['AZURE_STORAGE_SAS_TOKEN'] = 'your-sas-token'
 # Or use connection string (remove BlobEndpoint if it includes container name):
-os.environ['AZURE_STORAGE_CONNECTION_STRING'] = 'DefaultEndpointsProtocol=https;AccountName=testrunai;AccountKey=<TODO-ACCOUNT_KEY>;EndpointSuffix=core.windows.net'
+os.environ['AZURE_STORAGE_ACCOUNT_NAME'] = 'runaisa'
 
 def test_azure_to_gpu_streaming():
     """Test streaming from Azure Blob Storage to GPU memory."""
@@ -62,7 +62,7 @@ def test_azure_to_gpu_streaming():
     # Construct Azure Blob Storage URI
     # Format: azure://<container>/<blob-path>
     # Note: Storage account comes from credentials, not the URI
-    file_path = f"azure://{AZURE_CONTAINER}/{AZURE_BLOB_PATH}"
+    file_path = f"az://{AZURE_CONTAINER}/{AZURE_BLOB_PATH}"
     
     print(f"Streaming from: {file_path}")
     print(f"Storage Account: {AZURE_STORAGE_ACCOUNT}")
@@ -104,19 +104,4 @@ def test_azure_to_gpu_streaming():
 
 if __name__ == "__main__":
     # Verify Azure credentials are set
-    has_credentials = (
-        os.getenv('AZURE_STORAGE_CONNECTION_STRING') or
-        (os.getenv('AZURE_STORAGE_ACCOUNT') and 
-         (os.getenv('AZURE_STORAGE_KEY') or os.getenv('AZURE_STORAGE_SAS_TOKEN')))
-    )
-    
-    if not has_credentials:
-        print("WARNING: Azure credentials not found in environment variables.")
-        print("Set one of the following:")
-        print("  1. AZURE_STORAGE_CONNECTION_STRING")
-        print("  2. AZURE_STORAGE_ACCOUNT + AZURE_STORAGE_KEY")
-        print("  3. AZURE_STORAGE_ACCOUNT + AZURE_STORAGE_SAS_TOKEN")
-        print("Or uncomment the credential lines in the script.")
-        print()
-    
     test_azure_to_gpu_streaming()
