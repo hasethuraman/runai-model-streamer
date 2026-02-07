@@ -237,8 +237,8 @@ common::ResponseCode AzureClient::async_read(const char* path,
             chunk_buffer,
             chunk_offset,
             bytesize_,
-            [request_id, counter, is_success, responder](bool success, const std::string& error_msg) {
-                if (success) {
+            [request_id, counter, is_success, responder](common::ResponseCode response_code, const std::string& error_msg) {
+                if (response_code == common::ResponseCode::Success) {
                     const auto running = counter->fetch_sub(1);
                     LOG(SPAM) << "Async read request " << request_id << " succeeded - " << running << " running";
                     
@@ -250,7 +250,8 @@ common::ResponseCode AzureClient::async_read(const char* path,
                     LOG(ERROR) << "Failed to download Azure blob of request " << request_id << ": " << error_msg;
                     bool previous = is_success->exchange(false);
                     if (previous) {
-                        common::backend_api::Response r(request_id, common::ResponseCode::FileAccessError);
+                        // Propagate the specific error code from Azure SDK
+                        common::backend_api::Response r(request_id, response_code);
                         responder->push(std::move(r));
                     }
                 }
