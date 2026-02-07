@@ -49,7 +49,7 @@ class AzuriteServer(ObjectStoreBackend):
 
 TestAzureCompatibility = compatibility_test_cases(
     backend_class=AzuriteServer,
-    scheme="az",
+    scheme="azure",
     bucket_name=os.getenv("AZURE_CONTAINER")
 )
 

@@ -6,7 +6,7 @@
 
 // For connecting to Azure Blob Storage:
 //
-// 1. Uri should be in the format az://container/path
+// 1. Uri should be in the format azure://container/path
 //
 // 2. Authentication using DefaultAzureCredential:
 //    - Set AZURE_STORAGE_ACCOUNT_NAME environment variable
@@ -17,16 +17,13 @@
 //      * Azure PowerShell (Connect-AzAccount)
 //      * Azure Developer CLI (azd auth login)
 //
-// 3. Optional configuration:
-//    - Custom endpoint: AZURE_STORAGE_ENDPOINT (for private endpoints)
-//
-// 4. For local testing with Azurite:
+// 3. For local testing with Azurite:
 //    - Use AZURE_STORAGE_CONNECTION_STRING environment variable
 //    - Run Azurite with --skipApiVersionCheck flag
 //
 // Example usage:
-// managed:   AZURE_STORAGE_ACCOUNT_NAME="account" <streamer app> az://container/path
-// azurite:   AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=http;..." <streamer app> az://container/path
+// managed:   AZURE_STORAGE_ACCOUNT_NAME="account" <streamer app> azure://container/path
+// azurite:   AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=http;..." <streamer app> azure://container/path
 // programmatic: Pass credentials in ObjectClientConfig_t.initial_params
 
 namespace runai::llm::streamer::impl::azure

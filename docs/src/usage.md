@@ -144,7 +144,7 @@ To check if IAM role assumption is needed run `aws s3 ls s3://your-bucket-name -
 To load tensors from Azure Blob Storage, replace the file path in the code above with your Azure path, e.g.:
 
 ```python
-file_path = "az://my-container/my/file/path.safetensors"
+file_path = "azure://my-container/my/file/path.safetensors"
 ```
 
 ##### Azure Authentication
@@ -187,16 +187,6 @@ When running in Azure (VMs, AKS, Azure Functions, etc.), managed identity is use
 export AZURE_STORAGE_ACCOUNT_NAME="myaccount"
 # No additional configuration needed - managed identity is detected automatically
 ```
-
-###### Custom Endpoint (Private Endpoints)
-
-For Azure Private Endpoints or custom storage endpoints, set the endpoint URL:
-
-```bash
-export AZURE_STORAGE_ENDPOINT="https://myaccount.privatelink.blob.core.windows.net"
-```
-
-When using a custom endpoint, `AZURE_STORAGE_ACCOUNT_NAME` is optional since the endpoint URL is used directly.
 
 #### Streaming from Google cloud storage
 

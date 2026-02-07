@@ -7,7 +7,7 @@
 #include "utils/semver/semver.h"
 
 // For connecting to Azure Blob Storage:
-// 1. uri should be in the format az://container/path
+// 1. uri should be in the format azure://container/path
 // 2. Credentials can be provided via environment variables or config parameters
 // 3. See azure.h for detailed credential configuration options
 
