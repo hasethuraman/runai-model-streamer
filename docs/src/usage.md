@@ -188,6 +188,61 @@ export AZURE_STORAGE_ACCOUNT_NAME="myaccount"
 # No additional configuration needed - managed identity is detected automatically
 ```
 
+##### Azure Blob Cache Provider (Experimental)
+
+> **Experimental** — This feature is under active development and may change in future releases.
+
+The streamer supports pluggable cache providers for Azure Blob Storage. When a cache provider is configured, all blob reads are routed through the provider instead of the Azure SDK. This enables integration with distributed caches, local NVMe caches, or any custom caching layer to accelerate model loading.
+
+###### How it works
+
+1. Set `RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB` to the path of a shared library (`.so`)
+2. At startup, the streamer loads the library via `dlopen` and resolves the `az_cache_read` symbol
+3. All subsequent Azure blob reads are served through the cache provider
+
+The cache provider is responsible for serving data and managing its own cache lifecycle. How data is cached, populated, and evicted is entirely up to the cache provider implementation.
+
+###### Implementing a cache provider
+
+A cache provider is a shared library that exports a single C function:
+
+```c
+#include <stddef.h>
+#include <sys/types.h>
+
+extern "C" ssize_t az_cache_read(
+    const char* container,    /* Azure container name */
+    const char* blob,         /* Blob path within the container */
+    void* buf,                /* Output buffer (caller-allocated) */
+    size_t offset,            /* Byte offset within the blob */
+    size_t length,            /* Number of bytes to read */
+    char** error_string       /* On error: set to malloc'd message; caller frees */
+);
+```
+
+**Return value:** Number of bytes read on success (should equal `length`), or `-1` on error.
+
+The cache provider has full control over how data is served and cached.
+
+The full API contract is defined in [`cpp/azure/azcache_provider/runai_azcache_provider.h`](../cpp/azure/azcache_provider/runai_azcache_provider.h). A test reference implementation is available at [`cpp/azure/azcache_provider/simple_file_cache_test.cc`](../cpp/azure/azcache_provider/simple_file_cache_test.cc).
+
+###### Debugging
+
+Enable debug logging to verify the cache provider is loaded and serving reads:
+
+```bash
+export RUNAI_STREAMER_LOG_TO_STDERR=1
+export RUNAI_STREAMER_LOG_LEVEL=DEBUG
+```
+
+You should see:
+```text
+AzCacheProvider: loading cache library: /path/to/your_cache_provider.so
+AzCacheProvider: cache provider loaded successfully from /path/to/your_cache_provider.so
+```
+
+If the library fails to load or the symbol is not found, the streamer falls back to direct Azure Blob Storage access.
+
 #### Streaming from Google cloud storage
 
 ##### SDK Authentication

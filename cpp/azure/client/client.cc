@@ -195,8 +195,18 @@ common::ResponseCode AzureClient::async_read(const char* path,
 
     char * buffer_ = destination_buffer;
 
-    // Split range into chunks
-    size_t num_chunks = std::max(1UL, range.length / _chunk_bytesize);
+    // Split range into chunks.
+    // When a cache provider is loaded, issue a single read per range
+    // so the provider can handle alignment and prefetching internally.
+    size_t num_chunks;
+    if (_async_client->is_cache_enabled())
+    {
+        num_chunks = 1;
+    }
+    else
+    {
+        num_chunks = std::max(1UL, range.length / _chunk_bytesize);
+    }
     LOG(SPAM) << "Number of chunks is: " << num_chunks;
 
     // Counter for tracking chunk completions

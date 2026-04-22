@@ -112,6 +112,24 @@ String
 
 None
 
+### RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB
+
+> **Experimental** — This feature is under active development and may change in future releases.
+
+Path to a shared library (`.so`) that implements a custom cache provider for Azure Blob Storage reads. When set, the streamer dynamically loads the library at startup and routes all Azure blob reads through it instead of directly calling the Azure SDK.
+
+This enables integration with external caching systems (e.g., distributed caches, local NVMe caches) to accelerate model loading from Azure Blob Storage.
+
+See [Azure Blob Cache Provider (Experimental)](usage.md#azure-blob-cache-provider-experimental) in the usage guide for details on implementing a cache provider.
+
+#### Values accepted
+
+File path to a shared library (`.so`) exporting the `az_cache_read` symbol
+
+#### Default value
+
+None (cache provider disabled — reads go directly to Azure Blob Storage)
+
 ### RUNAI_STREAMER_DIST
 
 Enables distributed streaming for multiple devices
