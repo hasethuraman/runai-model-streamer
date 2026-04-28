@@ -231,6 +231,7 @@ common::ResponseCode AzureClient::async_read(const char* path,
         
         // Launch async download with callback - AsyncAzureClient ThreadPool handles both download and callback
         _async_client->DownloadBlobRangeAsync(
+            _account_name.value_or(""),
             container_name,
             blob_name,
             chunk_buffer,

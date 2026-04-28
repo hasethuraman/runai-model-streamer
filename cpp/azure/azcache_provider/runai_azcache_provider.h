@@ -1,12 +1,13 @@
 /*
- * RunAI Azure Cache Provider Interface
+ * RunAI Azure Cache Provider Interface (Experimental)
  *
  * This header defines the contract for Azure Blob Storage cache providers.
- * Any shared library (.so) that exports the function below can be used as a
- * cache provider for RunAI Model Streamer.
+ * A cache provider is a shared library (.so) that exports the blob_read symbol.
+ * When installed as a Python package alongside runai-model-streamer, the cache
+ * provider is auto-discovered and loaded at runtime — no configuration needed.
  *
- * To use a cache provider, set the environment variable:
- *   RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB=/path/to/your_cache_provider.so
+ * Control via environment variables:
+ *   RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_ENABLED=false  — disable cache entirely
  *
  * The cache provider is responsible for:
  *   - Serving cached blob data when available
@@ -19,8 +20,9 @@
  *
  *   #include "runai_azcache_provider.h"
  *
- *   extern "C" ssize_t az_cache_read(
- *       const char* container, const char* blob,
+ *   extern "C" ssize_t blob_read(
+ *       const char* account, const char* container,
+ *       const char* blob,
  *       void* buf, size_t offset, size_t length,
  *       char** error_string)
  *   {
@@ -43,6 +45,7 @@ extern "C" {
  * Read a range of bytes from a cached Azure blob.
  *
  * Parameters:
+ *   account      - Azure Storage account name
  *   container    - Azure Blob Storage container name
  *   blob         - Blob path within the container
  *   buf          - Output buffer (caller-allocated, at least 'length' bytes)
@@ -56,7 +59,8 @@ extern "C" {
  *   Number of bytes read on success (should equal 'length').
  *   -1 on error (error_string will be set if possible).
  */
-typedef ssize_t (*az_cache_read_fn)(
+typedef ssize_t (*blob_read_fn)(
+    const char* account,
     const char* container,
     const char* blob,
     void* buf,
@@ -65,9 +69,12 @@ typedef ssize_t (*az_cache_read_fn)(
     char** error_string);
 
 /* Symbol name that the cache provider .so must export */
-#define AZ_CACHE_READ_SYMBOL "az_cache_read"
+#define BLOB_READ_SYMBOL "blob_read"
 
-/* Environment variable pointing to the cache provider .so path */
+/* Environment variable to enable/disable cache (master kill switch) */
+#define RUNAI_AZURE_CACHE_ENABLED_ENV "RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_ENABLED"
+
+/* Environment variable pointing to the cache provider .so path (internal override) */
 #define RUNAI_AZURE_CACHE_LIB_ENV "RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB"
 
 #ifdef __cplusplus

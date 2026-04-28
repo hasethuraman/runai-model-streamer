@@ -1,7 +1,7 @@
 /*
  * Simple File-Based Cache Provider — TEST ONLY
  *
- * This is a minimal test implementation of the az_cache_read interface.
+ * This is a minimal test implementation of the blob_read interface.
  * It serves cached blobs from local files on disk:
  *
  *   <RUNAI_CACHE_DIR>/<container>/<blob>
@@ -65,7 +65,8 @@ extern "C" {
 #endif
 
 __attribute__((visibility("default")))
-ssize_t az_cache_read(
+ssize_t blob_read(
+    const char* account,
     const char* container,
     const char* blob,
     void* buf,
@@ -79,7 +80,7 @@ ssize_t az_cache_read(
     }
     *error_string = NULL;
 
-    if (!container || !blob || !buf)
+    if (!account || !container || !blob || !buf)
     {
         *error_string = make_error("null argument");
         return -1;

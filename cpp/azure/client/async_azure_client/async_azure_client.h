@@ -76,6 +76,7 @@ public:
      * The cache provider is responsible for handling cache misses internally.
      */
     void DownloadBlobRangeAsync(
+        const std::string& account_name,
         const std::string& container_name,
         const std::string& blob_name,
         char* buffer,
@@ -86,9 +87,9 @@ public:
         if (_cache_enabled)
         {
             DownloadBlobTask task{
-                [container_name, blob_name, buffer, offset, length]() {
+                [account_name, container_name, blob_name, buffer, offset, length]() {
                     bool ok = AzCacheProviderLoader::instance().read(
-                        container_name, blob_name, buffer, offset, length);
+                        account_name, container_name, blob_name, buffer, offset, length);
                     if (!ok)
                     {
                         throw std::runtime_error("Cache provider read failed");

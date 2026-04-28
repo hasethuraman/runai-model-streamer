@@ -192,15 +192,25 @@ export AZURE_STORAGE_ACCOUNT_NAME="myaccount"
 
 > **Experimental** — This feature is under active development and may change in future releases.
 
-The streamer supports pluggable cache providers for Azure Blob Storage. When a cache provider is configured, all blob reads are routed through the provider instead of the Azure SDK. This enables integration with distributed caches, local NVMe caches, or any custom caching layer to accelerate model loading.
+The streamer supports pluggable cache providers for Azure Blob Storage. When a compatible cache provider package is installed (e.g., `tachyon-client`), it is auto-discovered and loaded at runtime. All blob reads are then routed through the cache provider instead of the Azure SDK, enabling integration with distributed caches to accelerate model loading.
 
 ###### How it works
 
-1. Set `RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB` to the path of a shared library (`.so`)
-2. At startup, the streamer loads the library via `dlopen` and resolves the `az_cache_read` symbol
-3. All subsequent Azure blob reads are served through the cache provider
+1. Install the cache provider package alongside `runai-model-streamer` (e.g., `pip install tachyon-client`)
+2. At startup, the streamer auto-discovers the cache library in Python site-packages via `dladdr`
+3. The library is loaded via `dlopen` and the `blob_read` symbol is resolved
+4. All subsequent Azure blob reads are served through the cache provider
+5. If no cache provider is installed, reads go directly to Azure Blob Storage — no regression
 
-The cache provider is responsible for serving data and managing its own cache lifecycle. How data is cached, populated, and evicted is entirely up to the cache provider implementation.
+###### Disabling the cache
+
+To disable the cache provider even when it is installed, set:
+
+```bash
+export RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_ENABLED=false
+```
+
+This is the recommended way to disable caching in case of issues.
 
 ###### Implementing a cache provider
 
@@ -210,7 +220,8 @@ A cache provider is a shared library that exports a single C function:
 #include <stddef.h>
 #include <sys/types.h>
 
-extern "C" ssize_t az_cache_read(
+extern "C" ssize_t blob_read(
+    const char* account,      /* Azure Storage account name */
     const char* container,    /* Azure container name */
     const char* blob,         /* Blob path within the container */
     void* buf,                /* Output buffer (caller-allocated) */
@@ -222,7 +233,7 @@ extern "C" ssize_t az_cache_read(
 
 **Return value:** Number of bytes read on success (should equal `length`), or `-1` on error.
 
-The cache provider has full control over how data is served and cached.
+The cache provider has full control over how data is served and cached. The cache provider is responsible for serving data and managing its own cache lifecycle. How data is cached, populated, and evicted is entirely up to the cache provider implementation.
 
 The full API contract is defined in [`cpp/azure/azcache_provider/runai_azcache_provider.h`](../cpp/azure/azcache_provider/runai_azcache_provider.h). A test reference implementation is available at [`cpp/azure/azcache_provider/simple_file_cache_test.cc`](../cpp/azure/azcache_provider/simple_file_cache_test.cc).
 
@@ -237,11 +248,11 @@ export RUNAI_STREAMER_LOG_LEVEL=DEBUG
 
 You should see:
 ```text
-AzCacheProvider: loading cache library: /path/to/your_cache_provider.so
-AzCacheProvider: cache provider loaded successfully from /path/to/your_cache_provider.so
+AzCacheProvider: auto-discovered cache library: /path/to/site-packages/py_tachyon_client/libStorageDirect.so
+AzCacheProvider: cache provider loaded successfully from /path/to/...
 ```
 
-If the library fails to load or the symbol is not found, the streamer falls back to direct Azure Blob Storage access.
+If the library is not found or fails to load, the streamer falls back to direct Azure Blob Storage access.
 
 #### Streaming from Google cloud storage
 

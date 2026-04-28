@@ -60,7 +60,7 @@ protected:
     }
 
     // Directly dlopen the example .so and return the function pointer
-    az_cache_read_fn load_cache_fn()
+    blob_read_fn load_cache_fn()
     {
         void* handle = dlopen(so_path_.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!handle)
@@ -68,8 +68,8 @@ protected:
             ADD_FAILURE() << "dlopen failed: " << dlerror();
             return nullptr;
         }
-        auto fn = reinterpret_cast<az_cache_read_fn>(
-            dlsym(handle, AZ_CACHE_READ_SYMBOL));
+        auto fn = reinterpret_cast<blob_read_fn>(
+            dlsym(handle, BLOB_READ_SYMBOL));
         if (!fn)
         {
             ADD_FAILURE() << "dlsym failed: " << dlerror();
@@ -96,7 +96,7 @@ TEST_F(SimpleFileCacheTest, ReadFullBlob)
     // Read the full blob
     std::vector<uint8_t> buf(1024);
     char* error = nullptr;
-    ssize_t result = cache_read("test-container", "model/weights.bin",
+    ssize_t result = cache_read("test-account", "test-container", "model/weights.bin",
                                 buf.data(), 0, 1024, &error);
     ASSERT_EQ(result, 1024) << (error ? error : "no error detail");
     EXPECT_EQ(error, nullptr);
@@ -126,7 +126,7 @@ TEST_F(SimpleFileCacheTest, ReadRange)
     std::vector<uint8_t> buf(length);
     char* error = nullptr;
 
-    ssize_t result = cache_read("models", "llm/shard-0001.safetensors",
+    ssize_t result = cache_read("test-account", "models", "llm/shard-0001.safetensors",
                                 buf.data(), offset, length, &error);
     ASSERT_EQ(result, static_cast<ssize_t>(length)) << (error ? error : "no error");
     EXPECT_EQ(error, nullptr);
@@ -150,7 +150,7 @@ TEST_F(SimpleFileCacheTest, MissingBlobReturnsError)
     char buf[100];
     char* error = nullptr;
 
-    ssize_t result = cache_read("no-such-container", "no-such-blob",
+    ssize_t result = cache_read("test-account", "no-such-container", "no-such-blob",
                                 buf, 0, 100, &error);
     EXPECT_EQ(result, -1);
     EXPECT_NE(error, nullptr);
@@ -176,7 +176,7 @@ TEST_F(SimpleFileCacheTest, ShortReadReturnsError)
     char buf[100];
     char* error = nullptr;
 
-    ssize_t result = cache_read("c", "small.bin", buf, 0, 100, &error);
+    ssize_t result = cache_read("test-account", "c", "small.bin", buf, 0, 100, &error);
     EXPECT_EQ(result, -1);
     EXPECT_NE(error, nullptr);
     if (error)
@@ -194,13 +194,16 @@ TEST_F(SimpleFileCacheTest, NullArgumentsReturnError)
     char* error = nullptr;
     char buf[10];
 
-    EXPECT_EQ(cache_read(nullptr, "blob", buf, 0, 10, &error), -1);
+    EXPECT_EQ(cache_read(nullptr, "c", "blob", buf, 0, 10, &error), -1);
     if (error) { free(error); error = nullptr; }
 
-    EXPECT_EQ(cache_read("c", nullptr, buf, 0, 10, &error), -1);
+    EXPECT_EQ(cache_read("a", nullptr, "blob", buf, 0, 10, &error), -1);
     if (error) { free(error); error = nullptr; }
 
-    EXPECT_EQ(cache_read("c", "b", nullptr, 0, 10, &error), -1);
+    EXPECT_EQ(cache_read("a", "c", nullptr, buf, 0, 10, &error), -1);
+    if (error) { free(error); error = nullptr; }
+
+    EXPECT_EQ(cache_read("a", "c", "b", nullptr, 0, 10, &error), -1);
     if (error) { free(error); error = nullptr; }
 }
 
@@ -220,10 +223,10 @@ TEST_F(SimpleFileCacheTest, MultipleContainers)
     char buf[4];
     char* error = nullptr;
 
-    ASSERT_EQ(cache_read("container-a", "file.bin", buf, 0, 4, &error), 4);
+    ASSERT_EQ(cache_read("test-account", "container-a", "file.bin", buf, 0, 4, &error), 4);
     EXPECT_EQ(memcmp(buf, data_a.data(), 4), 0);
 
-    ASSERT_EQ(cache_read("container-b", "file.bin", buf, 0, 4, &error), 4);
+    ASSERT_EQ(cache_read("test-account", "container-b", "file.bin", buf, 0, 4, &error), 4);
     EXPECT_EQ(memcmp(buf, data_b.data(), 4), 0);
 
     if (error) free(error);
@@ -240,25 +243,25 @@ TEST_F(SimpleFileCacheTest, PathTraversalRejected)
     char* error = nullptr;
 
     // ".." in container
-    EXPECT_EQ(cache_read("../etc", "passwd", buf, 0, 10, &error), -1);
+    EXPECT_EQ(cache_read("a", "../etc", "passwd", buf, 0, 10, &error), -1);
     ASSERT_NE(error, nullptr);
     EXPECT_NE(std::string(error).find("path traversal"), std::string::npos);
     free(error); error = nullptr;
 
     // ".." in blob
-    EXPECT_EQ(cache_read("c", "../../etc/passwd", buf, 0, 10, &error), -1);
+    EXPECT_EQ(cache_read("a", "c", "../../etc/passwd", buf, 0, 10, &error), -1);
     ASSERT_NE(error, nullptr);
     EXPECT_NE(std::string(error).find("path traversal"), std::string::npos);
     free(error); error = nullptr;
 
     // ".." embedded in path
-    EXPECT_EQ(cache_read("c", "sub/../../../etc/shadow", buf, 0, 10, &error), -1);
+    EXPECT_EQ(cache_read("a", "c", "sub/../../../etc/shadow", buf, 0, 10, &error), -1);
     ASSERT_NE(error, nullptr);
     EXPECT_NE(std::string(error).find("path traversal"), std::string::npos);
     free(error); error = nullptr;
 
     // "..." (not traversal) should NOT be rejected — will fail with open error instead
-    EXPECT_EQ(cache_read("c", "...", buf, 0, 10, &error), -1);
+    EXPECT_EQ(cache_read("a", "c", "...", buf, 0, 10, &error), -1);
     ASSERT_NE(error, nullptr);
     EXPECT_EQ(std::string(error).find("path traversal"), std::string::npos);
     free(error); error = nullptr;

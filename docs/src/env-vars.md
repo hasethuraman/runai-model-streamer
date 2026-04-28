@@ -112,23 +112,23 @@ String
 
 None
 
-### RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB
+### RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_ENABLED
 
 > **Experimental** — This feature is under active development and may change in future releases.
 
-Path to a shared library (`.so`) that implements a custom cache provider for Azure Blob Storage reads. When set, the streamer dynamically loads the library at startup and routes all Azure blob reads through it instead of directly calling the Azure SDK.
+Controls whether the Azure Blob cache provider is enabled. When a compatible cache provider package (e.g., `tachyon-client`) is installed alongside `runai-model-streamer`, the streamer auto-discovers and loads it at runtime to accelerate model loading from Azure Blob Storage via a distributed cache.
 
-This enables integration with external caching systems (e.g., distributed caches, local NVMe caches) to accelerate model loading from Azure Blob Storage.
+Set to `false` to disable the cache provider entirely, even if the package is installed. This is the recommended way to disable caching in case of issues.
 
-See [Azure Blob Cache Provider (Experimental)](usage.md#azure-blob-cache-provider-experimental) in the usage guide for details on implementing a cache provider.
+See [Azure Blob Cache Provider (Experimental)](usage.md#azure-blob-cache-provider-experimental) in the usage guide for details.
 
 #### Values accepted
 
-File path to a shared library (`.so`) exporting the `az_cache_read` symbol
+`true`, `false`, `0`, `1`
 
 #### Default value
 
-None (cache provider disabled — reads go directly to Azure Blob Storage)
+Unset — cache is auto-enabled when a compatible cache provider package is installed
 
 ### RUNAI_STREAMER_DIST
 
