@@ -58,15 +58,17 @@ inline DownloadBlobFn createDownloadBlobFn(
  * An async wrapper for Azure Blob Storage client operations.
  * Uses ThreadPool to manage concurrent blob download operations.
  * 
- * When a cache provider is configured (via RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB),
- * the client will read from the cache instead of Azure Blob Storage.
+ * When a cache provider is configured, the client will read from
+ * the cache instead of Azure Blob Storage.
  */
 struct AsyncAzureClient
 {
 public:
-    AsyncAzureClient(std::shared_ptr<Azure::Storage::Blobs::BlobServiceClient> client, unsigned max_pool_size);
+    AsyncAzureClient(std::shared_ptr<Azure::Storage::Blobs::BlobServiceClient> client,
+                     unsigned max_pool_size,
+                     std::shared_ptr<AzCacheProviderLoader> cache_loader = nullptr);
 
-    /** Returns true when a cache provider .so has been loaded (cached at construction). */
+    /** Returns true when a cache provider .so has been loaded. */
     bool is_cache_enabled() const { return _cache_enabled; }
 
     /**
@@ -86,9 +88,11 @@ public:
     {
         if (_cache_enabled)
         {
+            // Capture shared_ptr to loader to ensure lifetime
+            auto loader = _cache_loader;
             DownloadBlobTask task{
-                [account_name, container_name, blob_name, buffer, offset, length]() {
-                    bool ok = AzCacheProviderLoader::instance().read(
+                [loader, account_name, container_name, blob_name, buffer, offset, length]() {
+                    bool ok = loader->read(
                         account_name, container_name, blob_name, buffer, offset, length);
                     if (!ok)
                     {
@@ -117,7 +121,8 @@ private:
 
     std::shared_ptr<Azure::Storage::Blobs::BlobServiceClient> _client;
     utils::ThreadPool<DownloadBlobTask> _pool;
-    const bool _cache_enabled;  // snapshot of cache state at construction
+    std::shared_ptr<AzCacheProviderLoader> _cache_loader;
+    const bool _cache_enabled;
 };
 
 }; // namespace runai::llm::streamer::impl::azure

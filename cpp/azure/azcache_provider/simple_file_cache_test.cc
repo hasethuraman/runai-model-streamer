@@ -19,7 +19,7 @@
  * The cache must be pre-populated before use (e.g., by the test harness).
  *
  * To build:
- *   gcc -shared -fPIC -o libsimple_file_cache_test.so simple_file_cache_test.cc
+ *   g++ -shared -fPIC -o libsimple_file_cache_test.so simple_file_cache_test.cc
  *
  * To use:
  *   export RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB=/path/to/libsimple_file_cache_test.so
@@ -28,6 +28,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,9 +40,18 @@ static const char* get_cache_dir(void)
     return dir ? dir : "/mnt/cache";
 }
 
-static char* make_error(const char* msg)
+static void set_error(char* error_buf, size_t error_buf_size, const char* fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+
+static void set_error(char* error_buf, size_t error_buf_size, const char* fmt, ...)
 {
-    return strdup(msg);
+    if (error_buf && error_buf_size > 0)
+    {
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(error_buf, error_buf_size, fmt, args);
+        va_end(args);
+    }
 }
 
 /* Reject absolute paths and ".." components to prevent path traversal attacks. */
@@ -72,23 +82,18 @@ ssize_t blob_read(
     void* buf,
     size_t offset,
     size_t length,
-    char** error_string)
+    char* error_buf,
+    size_t error_buf_size)
 {
-    if (!error_string)
-    {
-        return -1;
-    }
-    *error_string = NULL;
-
     if (!account || !container || !blob || !buf)
     {
-        *error_string = make_error("null argument");
+        set_error(error_buf, error_buf_size, "null argument");
         return -1;
     }
 
     if (has_path_traversal(container) || has_path_traversal(blob))
     {
-        *error_string = make_error("path traversal rejected");
+        set_error(error_buf, error_buf_size, "path traversal rejected");
         return -1;
     }
 
@@ -98,25 +103,21 @@ ssize_t blob_read(
     int n = snprintf(path, sizeof(path), "%s/%s/%s", cache_dir, container, blob);
     if (n < 0 || (size_t)n >= sizeof(path))
     {
-        *error_string = make_error("cache path too long");
+        set_error(error_buf, error_buf_size, "cache path too long");
         return -1;
     }
 
     int fd = open(path, O_RDONLY);
     if (fd < 0)
     {
-        char err_buf[4200];
-        snprintf(err_buf, sizeof(err_buf), "open failed for '%s': %s", path, strerror(errno));
-        *error_string = make_error(err_buf);
+        set_error(error_buf, error_buf_size, "open failed for '%s': %s", path, strerror(errno));
         return -1;
     }
 
     ssize_t bytes_read = pread(fd, buf, length, (off_t)offset);
     if (bytes_read < 0)
     {
-        char err_buf[4200];
-        snprintf(err_buf, sizeof(err_buf), "pread failed for '%s': %s", path, strerror(errno));
-        *error_string = make_error(err_buf);
+        set_error(error_buf, error_buf_size, "pread failed for '%s': %s", path, strerror(errno));
         close(fd);
         return -1;
     }
@@ -125,11 +126,9 @@ ssize_t blob_read(
 
     if ((size_t)bytes_read != length)
     {
-        char err_buf[4200];
-        snprintf(err_buf, sizeof(err_buf),
+        set_error(error_buf, error_buf_size,
                  "short read for '%s': expected %zu bytes, got %zd",
                  path, length, bytes_read);
-        *error_string = make_error(err_buf);
         return -1;
     }
 

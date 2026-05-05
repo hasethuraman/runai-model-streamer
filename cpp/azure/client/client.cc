@@ -14,6 +14,7 @@
 #include <azure/core/exception.hpp>
 
 #include "azure/client/client.h"
+#include "azure/azcache_provider/azcache_provider_loader.h"
 #include "common/exception/exception.h"
 #include "utils/logging/logging.h"
 #include "utils/env/env.h"
@@ -105,8 +106,11 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
             throw common::Exception(common::ResponseCode::InvalidParameterError);
         }
 
-        // Create async client with ThreadPool
-        _async_client = std::make_unique<AsyncAzureClient>(_blob_service_client, _client_config.max_concurrency);
+        // Create cache provider loader from environment
+        auto cache_loader = AzCacheProviderLoader::from_env();
+
+        // Create async client with ThreadPool and cache loader
+        _async_client = std::make_unique<AsyncAzureClient>(_blob_service_client, _client_config.max_concurrency, cache_loader);
 
     } catch (const std::exception& e) {
         LOG(ERROR) << "Failed to initialize Azure client: " << e.what();

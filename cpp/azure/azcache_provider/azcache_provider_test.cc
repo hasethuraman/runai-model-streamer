@@ -95,14 +95,12 @@ TEST_F(SimpleFileCacheTest, ReadFullBlob)
 
     // Read the full blob
     std::vector<uint8_t> buf(1024);
-    char* error = nullptr;
+    char error_buf[RUNAI_CACHE_ERROR_BUF_SIZE] = {};
     ssize_t result = cache_read("test-account", "test-container", "model/weights.bin",
-                                buf.data(), 0, 1024, &error);
-    ASSERT_EQ(result, 1024) << (error ? error : "no error detail");
-    EXPECT_EQ(error, nullptr);
+                                buf.data(), 0, 1024, error_buf, sizeof(error_buf));
+    ASSERT_EQ(result, 1024) << (error_buf[0] ? error_buf : "no error detail");
+    EXPECT_EQ(error_buf[0], '\0');
     EXPECT_EQ(buf, data);
-
-    if (error) free(error);
 }
 
 TEST_F(SimpleFileCacheTest, ReadRange)
@@ -124,20 +122,18 @@ TEST_F(SimpleFileCacheTest, ReadRange)
     size_t offset = 1000;
     size_t length = 512;
     std::vector<uint8_t> buf(length);
-    char* error = nullptr;
+    char error_buf[RUNAI_CACHE_ERROR_BUF_SIZE] = {};
 
     ssize_t result = cache_read("test-account", "models", "llm/shard-0001.safetensors",
-                                buf.data(), offset, length, &error);
-    ASSERT_EQ(result, static_cast<ssize_t>(length)) << (error ? error : "no error");
-    EXPECT_EQ(error, nullptr);
+                                buf.data(), offset, length, error_buf, sizeof(error_buf));
+    ASSERT_EQ(result, static_cast<ssize_t>(length)) << (error_buf[0] ? error_buf : "no error");
+    EXPECT_EQ(error_buf[0], '\0');
 
     // Verify data matches the expected range
     for (size_t i = 0; i < length; ++i)
     {
         EXPECT_EQ(buf[i], data[offset + i]) << "mismatch at offset " << (offset + i);
     }
-
-    if (error) free(error);
 }
 
 TEST_F(SimpleFileCacheTest, MissingBlobReturnsError)
@@ -148,17 +144,13 @@ TEST_F(SimpleFileCacheTest, MissingBlobReturnsError)
     ASSERT_NE(cache_read, nullptr);
 
     char buf[100];
-    char* error = nullptr;
+    char error_buf[RUNAI_CACHE_ERROR_BUF_SIZE] = {};
 
     ssize_t result = cache_read("test-account", "no-such-container", "no-such-blob",
-                                buf, 0, 100, &error);
+                                buf, 0, 100, error_buf, sizeof(error_buf));
     EXPECT_EQ(result, -1);
-    EXPECT_NE(error, nullptr);
-    if (error)
-    {
-        EXPECT_NE(std::string(error).find("open failed"), std::string::npos);
-        free(error);
-    }
+    EXPECT_NE(error_buf[0], '\0');
+    EXPECT_NE(std::string(error_buf).find("open failed"), std::string::npos);
 }
 
 TEST_F(SimpleFileCacheTest, ShortReadReturnsError)
@@ -174,16 +166,13 @@ TEST_F(SimpleFileCacheTest, ShortReadReturnsError)
 
     // Try to read more than the file contains
     char buf[100];
-    char* error = nullptr;
+    char error_buf[RUNAI_CACHE_ERROR_BUF_SIZE] = {};
 
-    ssize_t result = cache_read("test-account", "c", "small.bin", buf, 0, 100, &error);
+    ssize_t result = cache_read("test-account", "c", "small.bin", buf, 0, 100,
+                                error_buf, sizeof(error_buf));
     EXPECT_EQ(result, -1);
-    EXPECT_NE(error, nullptr);
-    if (error)
-    {
-        EXPECT_NE(std::string(error).find("short read"), std::string::npos);
-        free(error);
-    }
+    EXPECT_NE(error_buf[0], '\0');
+    EXPECT_NE(std::string(error_buf).find("short read"), std::string::npos);
 }
 
 TEST_F(SimpleFileCacheTest, NullArgumentsReturnError)
@@ -191,20 +180,19 @@ TEST_F(SimpleFileCacheTest, NullArgumentsReturnError)
     auto cache_read = load_cache_fn();
     ASSERT_NE(cache_read, nullptr);
 
-    char* error = nullptr;
+    char error_buf[RUNAI_CACHE_ERROR_BUF_SIZE] = {};
     char buf[10];
 
-    EXPECT_EQ(cache_read(nullptr, "c", "blob", buf, 0, 10, &error), -1);
-    if (error) { free(error); error = nullptr; }
+    EXPECT_EQ(cache_read(nullptr, "c", "blob", buf, 0, 10, error_buf, sizeof(error_buf)), -1);
+    error_buf[0] = '\0';
 
-    EXPECT_EQ(cache_read("a", nullptr, "blob", buf, 0, 10, &error), -1);
-    if (error) { free(error); error = nullptr; }
+    EXPECT_EQ(cache_read("a", nullptr, "blob", buf, 0, 10, error_buf, sizeof(error_buf)), -1);
+    error_buf[0] = '\0';
 
-    EXPECT_EQ(cache_read("a", "c", nullptr, buf, 0, 10, &error), -1);
-    if (error) { free(error); error = nullptr; }
+    EXPECT_EQ(cache_read("a", "c", nullptr, buf, 0, 10, error_buf, sizeof(error_buf)), -1);
+    error_buf[0] = '\0';
 
-    EXPECT_EQ(cache_read("a", "c", "b", nullptr, 0, 10, &error), -1);
-    if (error) { free(error); error = nullptr; }
+    EXPECT_EQ(cache_read("a", "c", "b", nullptr, 0, 10, error_buf, sizeof(error_buf)), -1);
 }
 
 TEST_F(SimpleFileCacheTest, MultipleContainers)
@@ -221,15 +209,15 @@ TEST_F(SimpleFileCacheTest, MultipleContainers)
     ASSERT_NE(cache_read, nullptr);
 
     char buf[4];
-    char* error = nullptr;
+    char error_buf[RUNAI_CACHE_ERROR_BUF_SIZE] = {};
 
-    ASSERT_EQ(cache_read("test-account", "container-a", "file.bin", buf, 0, 4, &error), 4);
+    ASSERT_EQ(cache_read("test-account", "container-a", "file.bin", buf, 0, 4,
+                         error_buf, sizeof(error_buf)), 4);
     EXPECT_EQ(memcmp(buf, data_a.data(), 4), 0);
 
-    ASSERT_EQ(cache_read("test-account", "container-b", "file.bin", buf, 0, 4, &error), 4);
+    ASSERT_EQ(cache_read("test-account", "container-b", "file.bin", buf, 0, 4,
+                         error_buf, sizeof(error_buf)), 4);
     EXPECT_EQ(memcmp(buf, data_b.data(), 4), 0);
-
-    if (error) free(error);
 }
 
 TEST_F(SimpleFileCacheTest, PathTraversalRejected)
@@ -240,31 +228,75 @@ TEST_F(SimpleFileCacheTest, PathTraversalRejected)
     ASSERT_NE(cache_read, nullptr);
 
     char buf[10];
-    char* error = nullptr;
+    char error_buf[RUNAI_CACHE_ERROR_BUF_SIZE] = {};
 
     // ".." in container
-    EXPECT_EQ(cache_read("a", "../etc", "passwd", buf, 0, 10, &error), -1);
-    ASSERT_NE(error, nullptr);
-    EXPECT_NE(std::string(error).find("path traversal"), std::string::npos);
-    free(error); error = nullptr;
+    EXPECT_EQ(cache_read("a", "../etc", "passwd", buf, 0, 10, error_buf, sizeof(error_buf)), -1);
+    EXPECT_NE(std::string(error_buf).find("path traversal"), std::string::npos);
+    error_buf[0] = '\0';
 
     // ".." in blob
-    EXPECT_EQ(cache_read("a", "c", "../../etc/passwd", buf, 0, 10, &error), -1);
-    ASSERT_NE(error, nullptr);
-    EXPECT_NE(std::string(error).find("path traversal"), std::string::npos);
-    free(error); error = nullptr;
+    EXPECT_EQ(cache_read("a", "c", "../../etc/passwd", buf, 0, 10, error_buf, sizeof(error_buf)), -1);
+    EXPECT_NE(std::string(error_buf).find("path traversal"), std::string::npos);
+    error_buf[0] = '\0';
 
     // ".." embedded in path
-    EXPECT_EQ(cache_read("a", "c", "sub/../../../etc/shadow", buf, 0, 10, &error), -1);
-    ASSERT_NE(error, nullptr);
-    EXPECT_NE(std::string(error).find("path traversal"), std::string::npos);
-    free(error); error = nullptr;
+    EXPECT_EQ(cache_read("a", "c", "sub/../../../etc/shadow", buf, 0, 10, error_buf, sizeof(error_buf)), -1);
+    EXPECT_NE(std::string(error_buf).find("path traversal"), std::string::npos);
+    error_buf[0] = '\0';
 
     // "..." (not traversal) should NOT be rejected — will fail with open error instead
-    EXPECT_EQ(cache_read("a", "c", "...", buf, 0, 10, &error), -1);
-    ASSERT_NE(error, nullptr);
-    EXPECT_EQ(std::string(error).find("path traversal"), std::string::npos);
-    free(error); error = nullptr;
+    EXPECT_EQ(cache_read("a", "c", "...", buf, 0, 10, error_buf, sizeof(error_buf)), -1);
+    EXPECT_EQ(std::string(error_buf).find("path traversal"), std::string::npos);
+}
+
+// Test the AzCacheProviderLoader with explicit config
+TEST(CacheProviderLoaderTest, DisabledModeDoesNotLoad)
+{
+    CacheProviderConfig config;
+    config.mode = CacheMode::Disabled;
+    config.lib_path = "/nonexistent.so";
+
+    AzCacheProviderLoader loader(config);
+    EXPECT_FALSE(loader.is_enabled());
+}
+
+TEST(CacheProviderLoaderTest, AutoModeNoPathDisables)
+{
+    CacheProviderConfig config;
+    config.mode = CacheMode::Auto;
+    // lib_path empty
+
+    AzCacheProviderLoader loader(config);
+    EXPECT_FALSE(loader.is_enabled());
+}
+
+TEST(CacheProviderLoaderTest, AutoModeInvalidPathDisables)
+{
+    CacheProviderConfig config;
+    config.mode = CacheMode::Auto;
+    config.lib_path = "/nonexistent/path/to/lib.so";
+
+    AzCacheProviderLoader loader(config);
+    EXPECT_FALSE(loader.is_enabled());
+}
+
+TEST(CacheProviderLoaderTest, RequiredModeNoPathThrows)
+{
+    CacheProviderConfig config;
+    config.mode = CacheMode::Required;
+    // lib_path empty
+
+    EXPECT_THROW(AzCacheProviderLoader loader(config), std::exception);
+}
+
+TEST(CacheProviderLoaderTest, RequiredModeInvalidPathThrows)
+{
+    CacheProviderConfig config;
+    config.mode = CacheMode::Required;
+    config.lib_path = "/nonexistent/path/to/lib.so";
+
+    EXPECT_THROW(AzCacheProviderLoader loader(config), std::exception);
 }
 
 } // namespace runai::llm::streamer::impl::azure::testing

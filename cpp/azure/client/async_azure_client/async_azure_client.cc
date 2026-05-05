@@ -29,12 +29,16 @@ void DownloadBlobTask::execute() {
     }
 }
 
-AsyncAzureClient::AsyncAzureClient(std::shared_ptr<Azure::Storage::Blobs::BlobServiceClient> client, unsigned int max_pool_size) :
+AsyncAzureClient::AsyncAzureClient(
+    std::shared_ptr<Azure::Storage::Blobs::BlobServiceClient> client,
+    unsigned int max_pool_size,
+    std::shared_ptr<AzCacheProviderLoader> cache_loader) :
     _client(client),
     _pool([](DownloadBlobTask&& task, std::atomic<bool>& stopped) {
         task.execute();
     }, max_pool_size),
-    _cache_enabled(AzCacheProviderLoader::instance().is_enabled())
+    _cache_loader(std::move(cache_loader)),
+    _cache_enabled(_cache_loader && _cache_loader->is_enabled())
 {
 }
 

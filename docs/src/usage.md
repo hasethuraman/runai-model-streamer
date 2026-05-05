@@ -224,10 +224,11 @@ extern "C" ssize_t blob_read(
     const char* account,      /* Azure Storage account name */
     const char* container,    /* Azure container name */
     const char* blob,         /* Blob path within the container */
-    void* buf,                /* Output buffer (caller-allocated) */
+    void* buf,                /* Output buffer (caller-allocated, >= length bytes) */
     size_t offset,            /* Byte offset within the blob */
     size_t length,            /* Number of bytes to read */
-    char** error_string       /* On error: set to malloc'd message; caller frees */
+    char* error_buf,          /* Caller-owned buffer for NUL-terminated error message */
+    size_t error_buf_size     /* Size of error_buf in bytes */
 );
 ```
 

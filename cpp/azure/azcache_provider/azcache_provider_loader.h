@@ -1,7 +1,6 @@
 #pragma once
 
-#include <atomic>
-#include <mutex>
+#include <memory>
 #include <string>
 
 #include "azure/azcache_provider/runai_azcache_provider.h"
@@ -10,21 +9,52 @@ namespace runai::llm::streamer::impl::azure
 {
 
 /**
+ * Cache mode matching RUNAI_STREAMER_DIST pattern.
+ */
+enum class CacheMode
+{
+    Disabled,  // "0" — never use cache
+    Required,  // "1" — must load cache, fail if not found
+    Auto       // "auto" or unset — use if available, silently disable otherwise
+};
+
+/**
+ * Configuration for constructing a cache provider loader.
+ */
+struct CacheProviderConfig
+{
+    std::string lib_path;  // Path to the cache provider .so (empty = not configured)
+    CacheMode mode = CacheMode::Auto;
+};
+
+/**
  * AzCacheProviderLoader dynamically loads a cache provider .so at runtime
  * via dlopen/dlsym.
  *
- * Auto-discovers the cache library in Python site-packages (e.g., tachyon_client).
- * Can be disabled with RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_ENABLED=false.
- * Can be overridden with RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB=/path/to.so.
+ * No longer a global singleton — owned by AzureClient for testability.
+ * Use from_env() to create from environment variables.
  *
- * Thread-safe singleton — initialization happens once on first access.
+ * Thread-safe once constructed (immutable state after construction).
  */
 class AzCacheProviderLoader
 {
 public:
-    static AzCacheProviderLoader& instance();
+    /**
+     * Create a loader from environment variables:
+     *   RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_ENABLED: "0", "1", or "auto" (default)
+     *   RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB: explicit .so path override
+     *
+     * @throws common::Exception if mode=Required and library cannot be loaded.
+     */
+    static std::shared_ptr<AzCacheProviderLoader> from_env();
 
-    bool is_enabled() const { return _enabled.load(std::memory_order_relaxed); }
+    /**
+     * Create a loader with explicit configuration (for testing).
+     */
+    explicit AzCacheProviderLoader(const CacheProviderConfig& config);
+    ~AzCacheProviderLoader();
+
+    bool is_enabled() const { return _enabled; }
 
     /**
      * Read blob data through the cache provider.
@@ -35,7 +65,7 @@ public:
      * @param buffer     Destination buffer (caller-allocated)
      * @param offset     Byte offset within the blob
      * @param length     Number of bytes to read
-     * @return true on success, false on error
+     * @return true on success (length bytes read), false on error
      */
     bool read(const std::string& account,
               const std::string& container,
@@ -48,12 +78,9 @@ public:
     AzCacheProviderLoader& operator=(const AzCacheProviderLoader&) = delete;
 
 private:
-    AzCacheProviderLoader();
-    ~AzCacheProviderLoader();
-
     void* _lib_handle;
     blob_read_fn _cache_read;
-    std::atomic<bool> _enabled;
+    bool _enabled;
     std::string _lib_path;
 };
 
