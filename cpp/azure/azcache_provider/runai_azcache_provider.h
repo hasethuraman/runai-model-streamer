@@ -22,6 +22,10 @@
  *
  *   #include "runai_azcache_provider.h"
  *
+ *   extern "C" uint32_t runai_cache_abi_version(void) {
+ *       return RUNAI_CACHE_ABI_VERSION;
+ *   }
+ *
  *   extern "C" ssize_t blob_read(
  *       const char* account, const char* container,
  *       const char* blob,
@@ -38,6 +42,7 @@
 #define RUNAI_STREAMER_AZCACHE_PROVIDER_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 #ifdef __cplusplus
@@ -82,6 +87,18 @@ typedef ssize_t (*blob_read_fn)(
 
 /* Symbol name that the cache provider .so must export */
 #define BLOB_READ_SYMBOL "blob_read"
+
+/*
+ * ABI versioning — guards against incompatible .so after interface changes.
+ *
+ * The cache provider .so must export runai_cache_abi_version() returning
+ * RUNAI_CACHE_ABI_VERSION. The loader rejects libraries that do not export
+ * the symbol or return an unsupported version.
+ */
+#define RUNAI_CACHE_ABI_VERSION 1
+#define RUNAI_CACHE_ABI_VERSION_SYMBOL "runai_cache_abi_version"
+
+typedef uint32_t (*runai_cache_abi_version_fn)(void);
 
 /* Environment variable to control cache mode: "0", "1", or "auto" */
 #define RUNAI_AZURE_CACHE_ENABLED_ENV "RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_ENABLED"

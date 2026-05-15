@@ -29,6 +29,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,6 +74,12 @@ static int has_path_traversal(const char* s)
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+__attribute__((visibility("default")))
+uint32_t runai_cache_abi_version(void)
+{
+    return 1;
+}
 
 __attribute__((visibility("default")))
 ssize_t blob_read(

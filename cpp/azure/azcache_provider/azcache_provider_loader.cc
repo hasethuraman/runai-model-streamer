@@ -162,6 +162,43 @@ AzCacheProviderLoader::AzCacheProviderLoader(const CacheProviderConfig& config)
         return;
     }
 
+    // ABI version check — reject incompatible libraries early
+    auto version_fn = reinterpret_cast<runai_cache_abi_version_fn>(
+        dlsym(_lib_handle, RUNAI_CACHE_ABI_VERSION_SYMBOL));
+    if (!version_fn)
+    {
+        if (config.mode == CacheMode::Required)
+        {
+            LOG(ERROR) << "AzCacheProvider: '" << _lib_path << "' does not export "
+                       << RUNAI_CACHE_ABI_VERSION_SYMBOL << " — incompatible library";
+            dlclose(_lib_handle);
+            _lib_handle = nullptr;
+            throw common::Exception(common::ResponseCode::InvalidParameterError);
+        }
+        LOG(WARNING) << "AzCacheProvider: '" << _lib_path << "' does not export "
+                     << RUNAI_CACHE_ABI_VERSION_SYMBOL << " — skipping (pre-versioning build)";
+        dlclose(_lib_handle);
+        _lib_handle = nullptr;
+        return;
+    }
+    uint32_t lib_version = version_fn();
+    if (lib_version != RUNAI_CACHE_ABI_VERSION)
+    {
+        if (config.mode == CacheMode::Required)
+        {
+            LOG(ERROR) << "AzCacheProvider: ABI version mismatch — expected "
+                       << RUNAI_CACHE_ABI_VERSION << ", got " << lib_version;
+            dlclose(_lib_handle);
+            _lib_handle = nullptr;
+            throw common::Exception(common::ResponseCode::InvalidParameterError);
+        }
+        LOG(WARNING) << "AzCacheProvider: ABI version mismatch — expected "
+                     << RUNAI_CACHE_ABI_VERSION << ", got " << lib_version << " — skipping";
+        dlclose(_lib_handle);
+        _lib_handle = nullptr;
+        return;
+    }
+
     _cache_read = reinterpret_cast<blob_read_fn>(
         dlsym(_lib_handle, BLOB_READ_SYMBOL));
     if (!_cache_read)

@@ -76,10 +76,33 @@ protected:
         }
         return fn;
     }
+
+    // Verify the .so exports a compatible ABI version
+    uint32_t load_abi_version()
+    {
+        void* handle = dlopen(so_path_.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if (!handle)
+        {
+            ADD_FAILURE() << "dlopen failed: " << dlerror();
+            return 0;
+        }
+        auto version_fn = reinterpret_cast<runai_cache_abi_version_fn>(
+            dlsym(handle, RUNAI_CACHE_ABI_VERSION_SYMBOL));
+        if (!version_fn)
+        {
+            ADD_FAILURE() << "dlsym failed for " << RUNAI_CACHE_ABI_VERSION_SYMBOL << ": " << dlerror();
+            return 0;
+        }
+        return version_fn();
+    }
 };
 
 TEST_F(SimpleFileCacheTest, ReadFullBlob)
 {
+    // Verify ABI version is exported and matches expected
+    uint32_t version = load_abi_version();
+    ASSERT_EQ(version, RUNAI_CACHE_ABI_VERSION);
+
     // Populate cache with test data
     std::vector<uint8_t> data(1024);
     for (size_t i = 0; i < data.size(); ++i)
@@ -297,6 +320,211 @@ TEST(CacheProviderLoaderTest, RequiredModeInvalidPathThrows)
     config.lib_path = "/nonexistent/path/to/lib.so";
 
     EXPECT_THROW(AzCacheProviderLoader loader(config), std::exception);
+}
+
+// Helper: compile a minimal .so from source code string
+static std::string build_test_so(const std::string& source, const std::string& name)
+{
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("abi_test_" + std::to_string(getpid()));
+    fs::create_directories(dir);
+
+    fs::path src_path = dir / (name + ".c");
+    fs::path so_path = dir / (name + ".so");
+
+    std::ofstream ofs(src_path);
+    ofs << source;
+    ofs.close();
+
+    std::string cmd = "gcc -shared -fPIC -o " + so_path.string() + " " + src_path.string() + " 2>/dev/null";
+    int ret = system(cmd.c_str());
+    if (ret != 0) return "";
+    return so_path.string();
+}
+
+// --- ABI version tests with CacheProviderLoader ---
+
+TEST(CacheProviderLoaderAbiTest, AutoModeNoVersionSymbolDisables)
+{
+    // .so with blob_read but no runai_cache_abi_version
+    std::string src = R"(
+#include <stddef.h>
+#include <sys/types.h>
+ssize_t blob_read(const char* a, const char* c, const char* b,
+    void* buf, size_t offset, size_t length,
+    char* err, size_t err_sz) { return (ssize_t)length; }
+)";
+    std::string path = build_test_so(src, "no_version");
+    ASSERT_FALSE(path.empty());
+
+    CacheProviderConfig config;
+    config.mode = CacheMode::Auto;
+    config.lib_path = path;
+
+    AzCacheProviderLoader loader(config);
+    EXPECT_FALSE(loader.is_enabled());
+
+    std::filesystem::remove_all(std::filesystem::path(path).parent_path());
+}
+
+TEST(CacheProviderLoaderAbiTest, RequiredModeNoVersionSymbolThrows)
+{
+    // .so with blob_read but no runai_cache_abi_version
+    std::string src = R"(
+#include <stddef.h>
+#include <sys/types.h>
+ssize_t blob_read(const char* a, const char* c, const char* b,
+    void* buf, size_t offset, size_t length,
+    char* err, size_t err_sz) { return (ssize_t)length; }
+)";
+    std::string path = build_test_so(src, "no_version_req");
+    ASSERT_FALSE(path.empty());
+
+    CacheProviderConfig config;
+    config.mode = CacheMode::Required;
+    config.lib_path = path;
+
+    EXPECT_THROW(AzCacheProviderLoader loader(config), std::exception);
+
+    std::filesystem::remove_all(std::filesystem::path(path).parent_path());
+}
+
+TEST(CacheProviderLoaderAbiTest, AutoModeVersionMismatchDisables)
+{
+    // .so with version returning 999 (wrong)
+    std::string src = R"(
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/types.h>
+uint32_t runai_cache_abi_version(void) { return 999; }
+ssize_t blob_read(const char* a, const char* c, const char* b,
+    void* buf, size_t offset, size_t length,
+    char* err, size_t err_sz) { return (ssize_t)length; }
+)";
+    std::string path = build_test_so(src, "bad_version");
+    ASSERT_FALSE(path.empty());
+
+    CacheProviderConfig config;
+    config.mode = CacheMode::Auto;
+    config.lib_path = path;
+
+    AzCacheProviderLoader loader(config);
+    EXPECT_FALSE(loader.is_enabled());
+
+    std::filesystem::remove_all(std::filesystem::path(path).parent_path());
+}
+
+TEST(CacheProviderLoaderAbiTest, RequiredModeVersionMismatchThrows)
+{
+    // .so with version returning 999 (wrong)
+    std::string src = R"(
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/types.h>
+uint32_t runai_cache_abi_version(void) { return 999; }
+ssize_t blob_read(const char* a, const char* c, const char* b,
+    void* buf, size_t offset, size_t length,
+    char* err, size_t err_sz) { return (ssize_t)length; }
+)";
+    std::string path = build_test_so(src, "bad_version_req");
+    ASSERT_FALSE(path.empty());
+
+    CacheProviderConfig config;
+    config.mode = CacheMode::Required;
+    config.lib_path = path;
+
+    EXPECT_THROW(AzCacheProviderLoader loader(config), std::exception);
+
+    std::filesystem::remove_all(std::filesystem::path(path).parent_path());
+}
+
+TEST(CacheProviderLoaderAbiTest, AutoModeVersionMatchEnables)
+{
+    // .so with correct version and valid blob_read
+    std::string src = R"(
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/types.h>
+uint32_t runai_cache_abi_version(void) { return 1; }
+ssize_t blob_read(const char* a, const char* c, const char* b,
+    void* buf, size_t offset, size_t length,
+    char* err, size_t err_sz) { return (ssize_t)length; }
+)";
+    std::string path = build_test_so(src, "good_version");
+    ASSERT_FALSE(path.empty());
+
+    CacheProviderConfig config;
+    config.mode = CacheMode::Auto;
+    config.lib_path = path;
+
+    AzCacheProviderLoader loader(config);
+    EXPECT_TRUE(loader.is_enabled());
+
+    std::filesystem::remove_all(std::filesystem::path(path).parent_path());
+}
+
+TEST(CacheProviderLoaderAbiTest, RequiredModeVersionMatchEnables)
+{
+    // .so with correct version and valid blob_read
+    std::string src = R"(
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/types.h>
+uint32_t runai_cache_abi_version(void) { return 1; }
+ssize_t blob_read(const char* a, const char* c, const char* b,
+    void* buf, size_t offset, size_t length,
+    char* err, size_t err_sz) { return (ssize_t)length; }
+)";
+    std::string path = build_test_so(src, "good_version_req");
+    ASSERT_FALSE(path.empty());
+
+    CacheProviderConfig config;
+    config.mode = CacheMode::Required;
+    config.lib_path = path;
+
+    AzCacheProviderLoader loader(config);
+    EXPECT_TRUE(loader.is_enabled());
+
+    std::filesystem::remove_all(std::filesystem::path(path).parent_path());
+}
+
+TEST(CacheProviderLoaderAbiTest, AutoModeVersionMatchNoBlobReadDisables)
+{
+    // .so with correct version but no blob_read symbol
+    std::string src = R"(
+#include <stdint.h>
+uint32_t runai_cache_abi_version(void) { return 1; }
+)";
+    std::string path = build_test_so(src, "no_blob_read");
+    ASSERT_FALSE(path.empty());
+
+    CacheProviderConfig config;
+    config.mode = CacheMode::Auto;
+    config.lib_path = path;
+
+    AzCacheProviderLoader loader(config);
+    EXPECT_FALSE(loader.is_enabled());
+
+    std::filesystem::remove_all(std::filesystem::path(path).parent_path());
+}
+
+TEST(CacheProviderLoaderAbiTest, RequiredModeVersionMatchNoBlobReadThrows)
+{
+    // .so with correct version but no blob_read symbol
+    std::string src = R"(
+#include <stdint.h>
+uint32_t runai_cache_abi_version(void) { return 1; }
+)";
+    std::string path = build_test_so(src, "no_blob_read_req");
+    ASSERT_FALSE(path.empty());
+
+    CacheProviderConfig config;
+    config.mode = CacheMode::Required;
+    config.lib_path = path;
+
+    EXPECT_THROW(AzCacheProviderLoader loader(config), std::exception);
+
+    std::filesystem::remove_all(std::filesystem::path(path).parent_path());
 }
 
 } // namespace runai::llm::streamer::impl::azure::testing
