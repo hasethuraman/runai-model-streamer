@@ -207,7 +207,7 @@ The streamer supports pluggable cache providers for Azure Blob Storage. When a c
 To disable the cache provider even when it is installed, set:
 
 ```bash
-export RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_ENABLED=false
+export RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_ENABLED=0
 ```
 
 This is the recommended way to disable caching in case of issues.

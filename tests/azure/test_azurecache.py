@@ -122,12 +122,9 @@ class TestAzureCache:
     def test_stream_from_cache(self, cache_lib, cache_dir, model_tensors):
         """Stream a safetensors model from a file-based cache and verify all tensors.
 
-        Runs in a subprocess because AzCacheProviderLoader is a process-wide
-        singleton — the env var must be set before the C++ library initializes.
-
-        Uses a dummy Azure account name since all reads are served from the
-        cache provider — no real Azure credentials are needed.
-        """
+        Runs in a subprocess because AzCacheProviderLoader is created per-AzureClient
+        and the ClientMgr pool reuses clients — env vars are read at first client
+        creation and cannot be changed for a reused client within the same process."""
         cache_root, container, blob = cache_dir
 
         env = os.environ.copy()
@@ -157,11 +154,9 @@ with SafetensorsStreamer() as streamer:
     print(f"OK {{count}} tensors")
     assert count == {len(model_tensors)}, f"Expected {len(model_tensors)}, got {{count}}"
 """
-        # Run in a subprocess so RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB is set before
-        # the C++ AzCacheProviderLoader singleton initializes. The singleton
-        # reads the env var once at construction and cannot be reconfigured.
-        # Other azure tests in this process may have already initialized it
-        # without the cache lib, permanently disabling it for this process.
+        # Run in a subprocess because the ClientMgr pool reuses AzureClient instances
+        # along with their AzCacheProviderLoader — env vars are captured at first client
+        # creation and a pooled client won't pick up new env var values.
         result = subprocess.run(
             [sys.executable, "-c", script],
             env=env,
@@ -185,4 +180,5 @@ with SafetensorsStreamer() as streamer:
         assert not os.environ.get("RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB")
         # TODO: Full fallback verification requires a subprocess with Azure
         # credentials to confirm reads go through Azure SDK when env var is unset.
-        # The singleton design prevents in-process reconfiguration.
+        # ClientMgr pools clients, so env var changes within the same process
+        # won't affect already-created clients.
