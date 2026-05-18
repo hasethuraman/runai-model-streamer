@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "azure/azcache_provider/runai_azcache_provider.h"
@@ -28,10 +29,33 @@ struct CacheProviderConfig
 };
 
 /**
+ * Shared handle to the dlopen'd cache provider library.
+ * Loaded once, shared across all AzureClient instances via weak_ptr.
+ * When the last strong reference is released, calls shutdown() (if exported)
+ * to gracefully shut down the provider's resources.
+ */
+struct CacheLibHandle
+{
+    CacheLibHandle(const std::string& path, CacheMode mode);
+    ~CacheLibHandle();
+
+    CacheLibHandle(const CacheLibHandle&) = delete;
+    CacheLibHandle& operator=(const CacheLibHandle&) = delete;
+
+    void* lib_handle;
+    blob_read_fn read_fn;
+    shutdown_fn close_fn;  // may be nullptr if not exported
+    std::string lib_path;
+};
+
+/**
  * AzCacheProviderLoader dynamically loads a cache provider .so at runtime
  * via dlopen/dlsym.
  *
- * No longer a global singleton — owned by AzureClient for testability.
+ * The library handle is shared across all loaders via a process-wide weak_ptr.
+ * The first loader to create the handle loads the library; when the last loader
+ * is destroyed, the handle destructor calls shutdown() for graceful shutdown.
+ *
  * Use from_env() to create from environment variables.
  *
  * Thread-safe once constructed (immutable state after construction).
@@ -78,10 +102,11 @@ public:
     AzCacheProviderLoader& operator=(const AzCacheProviderLoader&) = delete;
 
 private:
-    void* _lib_handle;
-    blob_read_fn _cache_read;
+    std::shared_ptr<CacheLibHandle> _handle;
     bool _enabled;
-    std::string _lib_path;
+
+    static std::weak_ptr<CacheLibHandle> s_shared_handle;
+    static std::mutex s_handle_mutex;
 };
 
 } // namespace runai::llm::streamer::impl::azure

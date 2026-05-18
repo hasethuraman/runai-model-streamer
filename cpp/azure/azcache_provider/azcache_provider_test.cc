@@ -273,6 +273,74 @@ TEST_F(SimpleFileCacheTest, PathTraversalRejected)
     EXPECT_EQ(std::string(error_buf).find("path traversal"), std::string::npos);
 }
 
+// --- Shared handle tests ---
+
+TEST_F(SimpleFileCacheTest, SharedHandleMultipleLoadersSameLibrary)
+{
+    // Multiple loaders for the same library should share one CacheLibHandle
+    setenv("RUNAI_CACHE_DIR", cache_dir_.c_str(), 1);
+
+    CacheProviderConfig config;
+    config.mode = CacheMode::Auto;
+    config.lib_path = so_path_.string();
+
+    auto loader1 = std::make_shared<AzCacheProviderLoader>(config);
+    EXPECT_TRUE(loader1->is_enabled());
+
+    auto loader2 = std::make_shared<AzCacheProviderLoader>(config);
+    EXPECT_TRUE(loader2->is_enabled());
+
+    // Both should work
+    std::vector<uint8_t> data = {0xDE, 0xAD, 0xBE, 0xEF};
+    populate_cache("shared-test", "blob.bin", data);
+    char buf[4];
+    EXPECT_TRUE(loader1->read("acct", "shared-test", "blob.bin", buf, 0, 4));
+    EXPECT_TRUE(loader2->read("acct", "shared-test", "blob.bin", buf, 0, 4));
+
+    // Destroy first — cache should still work via second
+    loader1.reset();
+    EXPECT_TRUE(loader2->read("acct", "shared-test", "blob.bin", buf, 0, 4));
+}
+
+TEST_F(SimpleFileCacheTest, ShutdownCalledOnLastDestruction)
+{
+    setenv("RUNAI_CACHE_DIR", cache_dir_.c_str(), 1);
+
+    CacheProviderConfig config;
+    config.mode = CacheMode::Auto;
+    config.lib_path = so_path_.string();
+
+    // Load the .so to check shutdown_called() helper
+    void* handle = dlopen(so_path_.c_str(), RTLD_NOW | RTLD_LOCAL);
+    ASSERT_NE(handle, nullptr) << dlerror();
+    auto close_called_fn = reinterpret_cast<int(*)()>(dlsym(handle, "shutdown_called"));
+    ASSERT_NE(close_called_fn, nullptr);
+    auto reset_fn = reinterpret_cast<void(*)()>(dlsym(handle, "shutdown_reset"));
+    ASSERT_NE(reset_fn, nullptr);
+
+    // Reset state from any prior test (OS dedupes dlopen, so g_closed persists)
+    reset_fn();
+    EXPECT_EQ(close_called_fn(), 0);
+
+    {
+        auto loader1 = std::make_shared<AzCacheProviderLoader>(config);
+        EXPECT_TRUE(loader1->is_enabled());
+
+        auto loader2 = std::make_shared<AzCacheProviderLoader>(config);
+        EXPECT_TRUE(loader2->is_enabled());
+
+        // Destroy first loader — shutdown should NOT be called yet
+        loader1.reset();
+        EXPECT_EQ(close_called_fn(), 0);
+
+        // Destroy last loader — shutdown SHOULD be called
+        loader2.reset();
+    }
+
+    EXPECT_EQ(close_called_fn(), 1);
+    dlclose(handle);
+}
+
 // Test the AzCacheProviderLoader with explicit config
 TEST(CacheProviderLoaderTest, DisabledModeDoesNotLoad)
 {

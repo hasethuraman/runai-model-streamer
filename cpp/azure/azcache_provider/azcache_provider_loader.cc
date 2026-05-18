@@ -6,11 +6,16 @@
 #include <algorithm>
 
 #include "common/exception/exception.h"
+#include "utils/dylib/dylib.h"
 #include "utils/logging/logging.h"
 #include "utils/env/env.h"
 
 namespace runai::llm::streamer::impl::azure
 {
+
+// Static members
+std::weak_ptr<CacheLibHandle> AzCacheProviderLoader::s_shared_handle;
+std::mutex AzCacheProviderLoader::s_handle_mutex;
 
 namespace
 {
@@ -79,6 +84,131 @@ CacheMode parse_cache_mode(const std::string& val)
 
 } // anonymous namespace
 
+// --- CacheLibHandle implementation ---
+
+CacheLibHandle::CacheLibHandle(const std::string& path, CacheMode mode)
+    : lib_handle(nullptr),
+      read_fn(nullptr),
+      close_fn(nullptr),
+      lib_path(path)
+{
+    LOG(INFO) << "AzCacheProvider: loading cache library: " << lib_path;
+
+    try
+    {
+        lib_handle = utils::Dylib::dlopen(lib_path, RTLD_NOW | RTLD_LOCAL);
+    }
+    catch (...)
+    {
+        if (mode == CacheMode::Required)
+        {
+            throw common::Exception(common::ResponseCode::InvalidParameterError);
+        }
+        return;
+    }
+
+    // ABI version check
+    runai_cache_abi_version_fn version_fn = nullptr;
+    try
+    {
+        version_fn = utils::Dylib::dlsym<runai_cache_abi_version_fn>(lib_handle, RUNAI_CACHE_ABI_VERSION_SYMBOL);
+    }
+    catch (...)
+    {
+        if (mode == CacheMode::Required)
+        {
+            LOG(ERROR) << "AzCacheProvider: '" << lib_path << "' does not export "
+                       << RUNAI_CACHE_ABI_VERSION_SYMBOL << " — incompatible library";
+            utils::Dylib::dlclose(lib_handle);
+            lib_handle = nullptr;
+            throw common::Exception(common::ResponseCode::InvalidParameterError);
+        }
+        LOG(WARNING) << "AzCacheProvider: '" << lib_path << "' does not export "
+                     << RUNAI_CACHE_ABI_VERSION_SYMBOL << " — skipping (pre-versioning build)";
+        utils::Dylib::dlclose(lib_handle);
+        lib_handle = nullptr;
+        return;
+    }
+
+    uint32_t lib_version = version_fn();
+    if (lib_version != RUNAI_CACHE_ABI_VERSION)
+    {
+        if (mode == CacheMode::Required)
+        {
+            LOG(ERROR) << "AzCacheProvider: ABI version mismatch — expected "
+                       << RUNAI_CACHE_ABI_VERSION << ", got " << lib_version;
+            utils::Dylib::dlclose(lib_handle);
+            lib_handle = nullptr;
+            throw common::Exception(common::ResponseCode::InvalidParameterError);
+        }
+        LOG(WARNING) << "AzCacheProvider: ABI version mismatch — expected "
+                     << RUNAI_CACHE_ABI_VERSION << ", got " << lib_version << " — skipping";
+        utils::Dylib::dlclose(lib_handle);
+        lib_handle = nullptr;
+        return;
+    }
+
+    // Resolve blob_read (required)
+    try
+    {
+        read_fn = utils::Dylib::dlsym<blob_read_fn>(lib_handle, BLOB_READ_SYMBOL);
+    }
+    catch (...)
+    {
+        if (mode == CacheMode::Required)
+        {
+            utils::Dylib::dlclose(lib_handle);
+            lib_handle = nullptr;
+            throw common::Exception(common::ResponseCode::InvalidParameterError);
+        }
+        utils::Dylib::dlclose(lib_handle);
+        lib_handle = nullptr;
+        return;
+    }
+
+    // Resolve shutdown (optional — don't throw if missing)
+    try
+    {
+        close_fn = utils::Dylib::dlsym<shutdown_fn>(lib_handle, SHUTDOWN_SYMBOL);
+    }
+    catch (...)
+    {
+        close_fn = nullptr; // not exported, that's fine
+    }
+
+    LOG(INFO) << "AzCacheProvider: cache provider loaded successfully from " << lib_path
+              << " (shutdown: " << (close_fn ? "yes" : "no") << ")";
+}
+
+CacheLibHandle::~CacheLibHandle()
+{
+    if (!lib_handle)
+    {
+        return;
+    }
+
+    // Call shutdown() for graceful shutdown before releasing the handle
+    if (close_fn)
+    {
+        LOG(INFO) << "AzCacheProvider: calling shutdown() for graceful shutdown";
+        try
+        {
+            close_fn();
+        }
+        catch (...)
+        {
+            LOG(ERROR) << "AzCacheProvider: shutdown() threw an exception";
+        }
+    }
+
+    // Note: we intentionally do NOT call dlclose() here.
+    lib_handle = nullptr;
+
+    LOG(DEBUG) << "AzCacheProvider: released cache provider handle";
+}
+
+// --- AzCacheProviderLoader implementation ---
+
 std::shared_ptr<AzCacheProviderLoader> AzCacheProviderLoader::from_env()
 {
     CacheProviderConfig config;
@@ -125,8 +255,7 @@ std::shared_ptr<AzCacheProviderLoader> AzCacheProviderLoader::from_env()
 }
 
 AzCacheProviderLoader::AzCacheProviderLoader(const CacheProviderConfig& config)
-    : _lib_handle(nullptr),
-      _cache_read(nullptr),
+    : _handle(nullptr),
       _enabled(false)
 {
     if (config.mode == CacheMode::Disabled)
@@ -146,86 +275,36 @@ AzCacheProviderLoader::AzCacheProviderLoader(const CacheProviderConfig& config)
         return;
     }
 
-    _lib_path = config.lib_path;
-    LOG(INFO) << "AzCacheProvider: loading cache library: " << _lib_path;
-
-    _lib_handle = dlopen(_lib_path.c_str(), RTLD_NOW | RTLD_LOCAL);
-    if (!_lib_handle)
+    // Acquire or create the shared library handle
     {
-        std::string err = dlerror();
-        if (config.mode == CacheMode::Required)
+        std::lock_guard<std::mutex> lock(s_handle_mutex);
+        _handle = s_shared_handle.lock();
+
+        if (_handle && _handle->lib_handle && _handle->lib_path == config.lib_path)
         {
-            LOG(ERROR) << "AzCacheProvider: dlopen failed for '" << _lib_path << "': " << err;
-            throw common::Exception(common::ResponseCode::InvalidParameterError);
+            // Reuse existing handle for same library
+            LOG(DEBUG) << "AzCacheProvider: reusing shared cache library handle for " << config.lib_path;
         }
-        LOG(WARNING) << "AzCacheProvider: dlopen failed for '" << _lib_path << "': " << err;
-        return;
+        else
+        {
+            // Create new handle (first loader or path changed)
+            _handle = std::make_shared<CacheLibHandle>(config.lib_path, config.mode);
+            s_shared_handle = _handle;
+        }
     }
 
-    // ABI version check — reject incompatible libraries early
-    auto version_fn = reinterpret_cast<runai_cache_abi_version_fn>(
-        dlsym(_lib_handle, RUNAI_CACHE_ABI_VERSION_SYMBOL));
-    if (!version_fn)
+    if (_handle && _handle->read_fn)
     {
-        if (config.mode == CacheMode::Required)
-        {
-            LOG(ERROR) << "AzCacheProvider: '" << _lib_path << "' does not export "
-                       << RUNAI_CACHE_ABI_VERSION_SYMBOL << " — incompatible library";
-            dlclose(_lib_handle);
-            _lib_handle = nullptr;
-            throw common::Exception(common::ResponseCode::InvalidParameterError);
-        }
-        LOG(WARNING) << "AzCacheProvider: '" << _lib_path << "' does not export "
-                     << RUNAI_CACHE_ABI_VERSION_SYMBOL << " — skipping (pre-versioning build)";
-        dlclose(_lib_handle);
-        _lib_handle = nullptr;
-        return;
+        _enabled = true;
     }
-    uint32_t lib_version = version_fn();
-    if (lib_version != RUNAI_CACHE_ABI_VERSION)
-    {
-        if (config.mode == CacheMode::Required)
-        {
-            LOG(ERROR) << "AzCacheProvider: ABI version mismatch — expected "
-                       << RUNAI_CACHE_ABI_VERSION << ", got " << lib_version;
-            dlclose(_lib_handle);
-            _lib_handle = nullptr;
-            throw common::Exception(common::ResponseCode::InvalidParameterError);
-        }
-        LOG(WARNING) << "AzCacheProvider: ABI version mismatch — expected "
-                     << RUNAI_CACHE_ABI_VERSION << ", got " << lib_version << " — skipping";
-        dlclose(_lib_handle);
-        _lib_handle = nullptr;
-        return;
-    }
-
-    _cache_read = reinterpret_cast<blob_read_fn>(
-        dlsym(_lib_handle, BLOB_READ_SYMBOL));
-    if (!_cache_read)
-    {
-        std::string err = dlerror();
-        if (config.mode == CacheMode::Required)
-        {
-            LOG(ERROR) << "AzCacheProvider: dlsym failed for '" << BLOB_READ_SYMBOL << "': " << err;
-            dlclose(_lib_handle);
-            _lib_handle = nullptr;
-            throw common::Exception(common::ResponseCode::InvalidParameterError);
-        }
-        LOG(WARNING) << "AzCacheProvider: dlsym failed for '" << BLOB_READ_SYMBOL << "': " << err;
-        dlclose(_lib_handle);
-        _lib_handle = nullptr;
-        return;
-    }
-
-    _enabled = true;
-    LOG(INFO) << "AzCacheProvider: cache provider loaded successfully from " << _lib_path;
 }
 
 AzCacheProviderLoader::~AzCacheProviderLoader()
 {
-    // Intentionally do NOT dlclose — at destruction time the loaded
-    // library may have already torn down its own statics, leading to
-    // use-after-free.  The OS reclaims everything on process exit.
+    // Release under mutex so destruction of CacheLibHandle (which calls shutdown())
+    // cannot race with a new loader trying to lock() the weak_ptr and recreate.
+    std::lock_guard<std::mutex> lock(s_handle_mutex);
+    _handle.reset();
 }
 
 bool AzCacheProviderLoader::read(
@@ -236,13 +315,13 @@ bool AzCacheProviderLoader::read(
     size_t offset,
     size_t length)
 {
-    if (!_enabled)
+    if (!_enabled || !_handle || !_handle->read_fn)
     {
         return false;
     }
 
     char error_buf[RUNAI_CACHE_ERROR_BUF_SIZE] = {};
-    ssize_t bytes_read = _cache_read(
+    ssize_t bytes_read = _handle->read_fn(
         account.c_str(), container.c_str(), blob.c_str(),
         buffer, offset, length, error_buf, sizeof(error_buf));
 

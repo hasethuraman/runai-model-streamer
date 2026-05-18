@@ -36,6 +36,11 @@
  *       // On error: snprintf(error_buf, error_buf_size, "details...");
  *       return length;  // bytes read on success, -1 on error
  *   }
+ *
+ *   extern "C" void shutdown(void) {
+ *       // Optional: graceful shutdown — stop threads, close connections.
+ *       // Called once when the streamer no longer needs the cache provider.
+ *   }
  */
 
 #ifndef RUNAI_STREAMER_AZCACHE_PROVIDER_H
@@ -87,6 +92,27 @@ typedef ssize_t (*blob_read_fn)(
 
 /* Symbol name that the cache provider .so must export */
 #define BLOB_READ_SYMBOL "blob_read"
+
+/*
+ * Optional: graceful shutdown of the cache provider.
+ *
+ * Called once when the streamer no longer needs the cache provider.
+ * The provider should stop background threads, close connections,
+ * and release resources. After shutdown() returns, no further
+ * blob_read() calls will be made.
+ *
+ * If the provider does not export this symbol, shutdown is skipped
+ * and resources are released at process exit by the OS.
+ *
+ * Contract:
+ *   - Called at most once per loaded library handle.
+ *   - Must not throw.
+ *   - Must be safe to call after all blob_read() calls have completed.
+ *   - Must tolerate partial initialization (e.g., if constructor failed midway).
+ */
+typedef void (*shutdown_fn)(void);
+
+#define SHUTDOWN_SYMBOL "shutdown"
 
 /*
  * ABI versioning — guards against incompatible .so after interface changes.

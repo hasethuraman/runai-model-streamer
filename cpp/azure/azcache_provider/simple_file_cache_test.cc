@@ -71,6 +71,8 @@ static int has_path_traversal(const char* s)
     return 0;
 }
 
+static int g_closed = 0;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -79,6 +81,24 @@ __attribute__((visibility("default")))
 uint32_t runai_cache_abi_version(void)
 {
     return 1;
+}
+
+__attribute__((visibility("default")))
+void shutdown(void)
+{
+    g_closed = 1;
+}
+
+__attribute__((visibility("default")))
+int shutdown_called(void)
+{
+    return g_closed;
+}
+
+__attribute__((visibility("default")))
+void shutdown_reset(void)
+{
+    g_closed = 0;
 }
 
 __attribute__((visibility("default")))

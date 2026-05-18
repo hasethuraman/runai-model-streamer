@@ -11,6 +11,7 @@ cc_library(
     visibility = ["//azure:__subpackages__"],
     deps = [
         "//common/exception",
+        "//utils/dylib",
         "//utils/logging",
         "//utils/env",
     ],
