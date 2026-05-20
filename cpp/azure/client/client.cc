@@ -15,6 +15,7 @@
 #include <azure/core/exception.hpp>
 
 #include "azure/client/client.h"
+#include "azure/azcache_provider/azcache_provider_loader.h"
 #include "common/exception/exception.h"
 #include "utils/logging/logging.h"
 #include "utils/env/env.h"
@@ -120,8 +121,11 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
             throw common::Exception(common::ResponseCode::InvalidParameterError);
         }
 
-        // Create async client with ThreadPool
-        _async_client = std::make_unique<AsyncAzureClient>(_blob_service_client, _client_config.max_concurrency);
+        // Create cache provider loader from environment
+        auto cache_loader = AzCacheProviderLoader::from_env();
+
+        // Create async client with ThreadPool and cache loader
+        _async_client = std::make_unique<AsyncAzureClient>(_blob_service_client, _client_config.max_concurrency, cache_loader);
 
     } catch (const std::exception& e) {
         LOG(ERROR) << "Failed to initialize Azure client: " << e.what();
@@ -212,8 +216,18 @@ common::ResponseCode AzureClient::async_read(const char* path,
 
     char * buffer_ = destination_buffer;
 
-    // Split range into chunks
-    size_t num_chunks = std::max(1UL, range.length / _chunk_bytesize);
+    // Split range into chunks.
+    // When a cache provider is loaded, issue a single read per range
+    // so the provider can handle alignment and prefetching internally.
+    size_t num_chunks;
+    if (_async_client->is_cache_enabled())
+    {
+        num_chunks = 1;
+    }
+    else
+    {
+        num_chunks = std::max(1UL, range.length / _chunk_bytesize);
+    }
     LOG(SPAM) << "Number of chunks is: " << num_chunks;
 
     // Counter for tracking chunk completions
@@ -238,6 +252,7 @@ common::ResponseCode AzureClient::async_read(const char* path,
         
         // Launch async download with callback - AsyncAzureClient ThreadPool handles both download and callback
         _async_client->DownloadBlobRangeAsync(
+            _account_name.value_or(""),
             container_name,
             blob_name,
             chunk_buffer,
