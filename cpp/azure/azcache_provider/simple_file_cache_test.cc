@@ -78,7 +78,7 @@ extern "C" {
 #endif
 
 __attribute__((visibility("default")))
-uint32_t runai_cache_abi_version(void)
+uint32_t cache_abi_version(void)
 {
     return 1;
 }
