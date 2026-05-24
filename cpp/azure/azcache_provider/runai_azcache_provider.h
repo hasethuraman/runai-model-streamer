@@ -22,7 +22,7 @@
  *
  *   #include "runai_azcache_provider.h"
  *
- *   extern "C" uint32_t runai_cache_abi_version(void) {
+ *   extern "C" uint32_t cache_abi_version(void) {
  *       return RUNAI_CACHE_ABI_VERSION;
  *   }
  *
@@ -117,12 +117,12 @@ typedef void (*shutdown_fn)(void);
 /*
  * ABI versioning — guards against incompatible .so after interface changes.
  *
- * The cache provider .so must export runai_cache_abi_version() returning
+ * The cache provider .so must export cache_abi_version() returning
  * RUNAI_CACHE_ABI_VERSION. The loader rejects libraries that do not export
  * the symbol or return an unsupported version.
  */
 #define RUNAI_CACHE_ABI_VERSION 1
-#define RUNAI_CACHE_ABI_VERSION_SYMBOL "runai_cache_abi_version"
+#define RUNAI_CACHE_ABI_VERSION_SYMBOL "cache_abi_version"
 
 typedef uint32_t (*runai_cache_abi_version_fn)(void);
 

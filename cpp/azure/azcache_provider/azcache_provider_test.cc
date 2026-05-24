@@ -414,7 +414,7 @@ static std::string build_test_so(const std::string& source, const std::string& n
 
 TEST(CacheProviderLoaderAbiTest, AutoModeNoVersionSymbolDisables)
 {
-    // .so with blob_read but no runai_cache_abi_version
+    // .so with blob_read but no cache_abi_version
     std::string src = R"(
 #include <stddef.h>
 #include <sys/types.h>
@@ -437,7 +437,7 @@ ssize_t blob_read(const char* a, const char* c, const char* b,
 
 TEST(CacheProviderLoaderAbiTest, RequiredModeNoVersionSymbolThrows)
 {
-    // .so with blob_read but no runai_cache_abi_version
+    // .so with blob_read but no cache_abi_version
     std::string src = R"(
 #include <stddef.h>
 #include <sys/types.h>
@@ -464,7 +464,7 @@ TEST(CacheProviderLoaderAbiTest, AutoModeVersionMismatchDisables)
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
-uint32_t runai_cache_abi_version(void) { return 999; }
+uint32_t cache_abi_version(void) { return 999; }
 ssize_t blob_read(const char* a, const char* c, const char* b,
     void* buf, size_t offset, size_t length,
     char* err, size_t err_sz) { return (ssize_t)length; }
@@ -489,7 +489,7 @@ TEST(CacheProviderLoaderAbiTest, RequiredModeVersionMismatchThrows)
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
-uint32_t runai_cache_abi_version(void) { return 999; }
+uint32_t cache_abi_version(void) { return 999; }
 ssize_t blob_read(const char* a, const char* c, const char* b,
     void* buf, size_t offset, size_t length,
     char* err, size_t err_sz) { return (ssize_t)length; }
@@ -513,7 +513,7 @@ TEST(CacheProviderLoaderAbiTest, AutoModeVersionMatchEnables)
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
-uint32_t runai_cache_abi_version(void) { return 1; }
+uint32_t cache_abi_version(void) { return 1; }
 ssize_t blob_read(const char* a, const char* c, const char* b,
     void* buf, size_t offset, size_t length,
     char* err, size_t err_sz) { return (ssize_t)length; }
@@ -538,7 +538,7 @@ TEST(CacheProviderLoaderAbiTest, RequiredModeVersionMatchEnables)
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
-uint32_t runai_cache_abi_version(void) { return 1; }
+uint32_t cache_abi_version(void) { return 1; }
 ssize_t blob_read(const char* a, const char* c, const char* b,
     void* buf, size_t offset, size_t length,
     char* err, size_t err_sz) { return (ssize_t)length; }
@@ -561,7 +561,7 @@ TEST(CacheProviderLoaderAbiTest, AutoModeVersionMatchNoBlobReadDisables)
     // .so with correct version but no blob_read symbol
     std::string src = R"(
 #include <stdint.h>
-uint32_t runai_cache_abi_version(void) { return 1; }
+uint32_t cache_abi_version(void) { return 1; }
 )";
     std::string path = build_test_so(src, "no_blob_read");
     ASSERT_FALSE(path.empty());
@@ -581,7 +581,7 @@ TEST(CacheProviderLoaderAbiTest, RequiredModeVersionMatchNoBlobReadThrows)
     // .so with correct version but no blob_read symbol
     std::string src = R"(
 #include <stdint.h>
-uint32_t runai_cache_abi_version(void) { return 1; }
+uint32_t cache_abi_version(void) { return 1; }
 )";
     std::string path = build_test_so(src, "no_blob_read_req");
     ASSERT_FALSE(path.empty());
