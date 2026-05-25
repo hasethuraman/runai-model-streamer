@@ -114,7 +114,7 @@ String
 
 ### AZURE_STORAGE_ACCOUNT_NAME
 
-Azure Storage account name. Used with DefaultAzureCredential for authentication.
+Azure Storage account name. Required for all Azure Blob Storage authentication methods.
 
 #### Values accepted
 
@@ -123,6 +123,32 @@ String
 #### Default value
 
 None
+
+### AZURE_STORAGE_SAS_TOKEN
+
+Shared Access Signature (SAS) token for Azure Blob Storage authentication. Used with AZURE_STORAGE_ACCOUNT_NAME.
+
+The value should be the query string portion of the SAS URI (with or without leading `?`), e.g. `sv=2021-08-06&ss=b&srt=co&sp=rl&se=...&sig=...`
+
+#### Values accepted
+
+String
+
+#### Default value
+
+None
+
+### AZURE_STORAGE_ENDPOINT_SUFFIX
+
+Azure Blob Storage endpoint suffix. Override for sovereign clouds (China, US Government) or Azure Stack.
+
+#### Values accepted
+
+String (e.g. `blob.core.chinacloudapi.cn`, `blob.core.usgovcloudapi.net`)
+
+#### Default value
+
+`blob.core.windows.net`
 
 ### RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_ENABLED
 

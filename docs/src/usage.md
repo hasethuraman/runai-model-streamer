@@ -159,7 +159,11 @@ file_path = "az://my-container/my/file/path.safetensors"
 
 ##### Azure Authentication
 
-The streamer uses Azure's DefaultAzureCredential for authentication, which provides a seamless authentication experience across development and production environments.
+The streamer supports multiple authentication methods for Azure Blob Storage, checked in this order:
+
+1. **SAS token** (`AZURE_STORAGE_SAS_TOKEN`)
+2. **Storage account key** (`AZURE_STORAGE_ACCOUNT_KEY`)
+3. **DefaultAzureCredential** (Recommended) — managed identity, Azure CLI, service principal, etc.
 
 ###### Default Azure Credential (Recommended)
 
@@ -197,6 +201,17 @@ When running in Azure (VMs, AKS, Azure Functions, etc.), managed identity is use
 export AZURE_STORAGE_ACCOUNT_NAME="myaccount"
 # No additional configuration needed - managed identity is detected automatically
 ```
+
+###### SAS Token
+
+To authenticate using a Shared Access Signature:
+
+```bash
+export AZURE_STORAGE_ACCOUNT_NAME="myaccount"
+export AZURE_STORAGE_SAS_TOKEN="sv=2021-08-06&ss=b&srt=co&sp=rl&se=2026-01-01T00:00:00Z&sig=..."
+```
+
+> **Note:** The SAS token value should be the query string portion of the SAS URI without the leading `?`.
 
 ##### Azure Blob Cache Provider (Experimental)
 
