@@ -204,7 +204,7 @@ CacheLibHandle::~CacheLibHandle()
     // Note: we intentionally do NOT call dlclose() here.
     lib_handle = nullptr;
 
-    LOG(DEBUG) << "AzCacheProvider: released cache provider handle";
+    LOG(INFO) << "AzCacheProvider: released cache provider handle";
 }
 
 // --- AzCacheProviderLoader implementation ---
@@ -297,6 +297,7 @@ AzCacheProviderLoader::AzCacheProviderLoader(const CacheProviderConfig& config)
     {
         _enabled = true;
     }
+    LOG(INFO) << "AzCacheProvider: cache provider is " << (_enabled ? "enabled" : "disabled");
 }
 
 AzCacheProviderLoader::~AzCacheProviderLoader()

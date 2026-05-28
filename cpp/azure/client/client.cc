@@ -35,11 +35,14 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
     // ClientConfiguration reads environment variables
     _account_name = _client_config.account_name;
     _account_key = _client_config.account_key;
+    _sas_token = _client_config.sas_token;
+    _endpoint_suffix = _client_config.endpoint_suffix;
 #ifdef AZURITE_TESTING
     _connection_string = _client_config.connection_string;
 #endif
 
     // Parse configuration parameters from API (overrides environment)
+    // Empty values are treated as unset to avoid overriding env vars with no-ops
     auto ptr = config.initial_params;
     if (ptr)
     {
@@ -48,6 +51,11 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
             const char* key = ptr->key;
             const char* value = ptr->value;
 
+            if (!value || strlen(value) == 0)
+            {
+                continue;
+            }
+
             if (strcmp(key, "account_name") == 0)
             {
                 _account_name = std::string(value);
@@ -55,6 +63,14 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
             else if (strcmp(key, "account_key") == 0)
             {
                 _account_key = std::string(value);
+            }
+            else if (strcmp(key, "sas_token") == 0)
+            {
+                _sas_token = std::string(value);
+            }
+            else if (strcmp(key, "endpoint_suffix") == 0)
+            {
+                _endpoint_suffix = std::string(value);
             }
 #ifdef AZURITE_TESTING
             else if (strcmp(key, "connection_string") == 0)
@@ -94,9 +110,19 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
         } else
 #endif
         if (_account_name.has_value()) {
-            if (_account_key.has_value()) {
+            if (_sas_token.has_value()) {
+                // Use SAS token authentication (no credential object needed)
+                // The token is appended as query string to the service URL
+                std::string token = _sas_token.value();
+                if (!token.empty() && token[0] == '?') {
+                    token = token.substr(1);
+                }
+                std::string url = "https://" + _account_name.value() + "." + _endpoint_suffix + "?" + token;
+                _blob_service_client = std::make_shared<BlobServiceClient>(url, options);
+                LOG(DEBUG) << "Azure client initialized with SAS token for account: " << _account_name.value();
+            } else if (_account_key.has_value()) {
                 // Use StorageSharedKeyCredential (account name + account key)
-                std::string url = "https://" + _account_name.value() + ".blob.core.windows.net";
+                std::string url = "https://" + _account_name.value() + "." + _endpoint_suffix;
                 auto credential = std::make_shared<Azure::Storage::StorageSharedKeyCredential>(
                     _account_name.value(), _account_key.value());
                 _blob_service_client = std::make_shared<BlobServiceClient>(url, credential, options);
@@ -104,7 +130,7 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
             } else {
                 // Use DefaultAzureCredential (managed identity, Azure CLI, environment variables, etc.)
                 // Reference: https://learn.microsoft.com/en-us/azure/developer/cpp/sdk/authentication
-                std::string url = "https://" + _account_name.value() + ".blob.core.windows.net";
+                std::string url = "https://" + _account_name.value() + "." + _endpoint_suffix;
                 // Share a single DefaultAzureCredential across all clients in the process to better
                 // utilize token caching and reduce chances of overwhelming authentication sources
                 // (e.g., IMDS) which can result in fatal throttling errors.
@@ -145,6 +171,8 @@ bool AzureClient::verify_credentials(const common::backend_api::ObjectClientConf
     ClientConfiguration temp_config;
     std::optional<std::string> temp_account_name = temp_config.account_name;
     std::optional<std::string> temp_account_key = temp_config.account_key;
+    std::optional<std::string> temp_sas_token = temp_config.sas_token;
+    std::string temp_endpoint_suffix = temp_config.endpoint_suffix;
 #ifdef AZURITE_TESTING
     std::optional<std::string> temp_connection_string = temp_config.connection_string;
 #endif
@@ -155,6 +183,8 @@ bool AzureClient::verify_credentials(const common::backend_api::ObjectClientConf
         for (size_t i = 0; i < config.num_initial_params; ++i, ++ptr) {
             if (strcmp(ptr->key, "account_name") == 0) temp_account_name = std::string(ptr->value);
             else if (strcmp(ptr->key, "account_key") == 0) temp_account_key = std::string(ptr->value);
+            else if (strcmp(ptr->key, "sas_token") == 0) temp_sas_token = std::string(ptr->value);
+            else if (strcmp(ptr->key, "endpoint_suffix") == 0) temp_endpoint_suffix = std::string(ptr->value);
 #ifdef AZURITE_TESTING
             else if (strcmp(ptr->key, "connection_string") == 0) temp_connection_string = std::string(ptr->value);
 #endif
@@ -166,7 +196,7 @@ bool AzureClient::verify_credentials(const common::backend_api::ObjectClientConf
         return (_connection_string == temp_connection_string);
     }
 #endif
-    return (_account_name == temp_account_name) && (_account_key == temp_account_key);
+    return (_account_name == temp_account_name) && (_account_key == temp_account_key) && (_sas_token == temp_sas_token) && (_endpoint_suffix == temp_endpoint_suffix);
 }
 
 common::backend_api::Response AzureClient::async_read_response()

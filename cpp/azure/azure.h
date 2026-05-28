@@ -11,10 +11,13 @@
 // 2. Authentication methods (checked in this order):
 //    a. Connection string (Azurite testing only, requires AZURITE_TESTING build):
 //       - Set AZURE_STORAGE_CONNECTION_STRING environment variable
-//    b. Storage account key:
+//    b. SAS token:
+//       - Set AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_SAS_TOKEN environment variables
+//       - Token is appended as query string to the service URL
+//    c. Storage account key:
 //       - Set AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_ACCOUNT_KEY environment variables
 //       - Uses StorageSharedKeyCredential
-//    c. DefaultAzureCredential:
+//    d. DefaultAzureCredential (Recommended):
 //       - Set AZURE_STORAGE_ACCOUNT_NAME environment variable
 //       - DefaultAzureCredential tries multiple authentication methods in order:
 //         * Environment variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET) for service principal
@@ -29,8 +32,10 @@
 //
 // Example usage:
 // key-based: AZURE_STORAGE_ACCOUNT_NAME="account" AZURE_STORAGE_ACCOUNT_KEY="key" <streamer app> az://container/path
+// sas-token: AZURE_STORAGE_ACCOUNT_NAME="account" AZURE_STORAGE_SAS_TOKEN="sv=2021-08-06&ss=b&..." <streamer app> az://container/path
 // managed:   AZURE_STORAGE_ACCOUNT_NAME="account" <streamer app> az://container/path
 // azurite:   AZURE_STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=http;..." <streamer app> az://container/path
+// sovereign: AZURE_STORAGE_ACCOUNT_NAME="account" AZURE_STORAGE_ENDPOINT_SUFFIX="blob.core.chinacloudapi.cn" <streamer app> az://container/path
 // programmatic: Pass credentials in ObjectClientConfig_t.initial_params
 
 namespace runai::llm::streamer::impl::azure

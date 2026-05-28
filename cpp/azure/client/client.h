@@ -47,6 +47,8 @@ struct AzureClient : common::IClient
     // Azure credentials
     std::optional<std::string> _account_name;
     std::optional<std::string> _account_key;
+    std::optional<std::string> _sas_token;
+    std::string _endpoint_suffix;
 #ifdef AZURITE_TESTING
     std::optional<std::string> _connection_string;
 #endif

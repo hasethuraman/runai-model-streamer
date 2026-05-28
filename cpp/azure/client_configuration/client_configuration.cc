@@ -28,6 +28,20 @@ ClientConfiguration::ClientConfiguration()
         account_key = acct_key;
     }
 
+    // SAS token for Shared Access Signature authentication
+    const auto sas = utils::getenv<std::string>("AZURE_STORAGE_SAS_TOKEN", "");
+    if (!sas.empty()) {
+        LOG(DEBUG) << "Using AZURE_STORAGE_SAS_TOKEN for authentication";
+        sas_token = sas;
+    }
+
+    // Endpoint suffix for sovereign clouds (default: blob.core.windows.net)
+    const auto suffix = utils::getenv<std::string>("AZURE_STORAGE_ENDPOINT_SUFFIX", "");
+    if (!suffix.empty()) {
+        LOG(DEBUG) << "Using custom endpoint suffix: " << suffix;
+        endpoint_suffix = suffix;
+    }
+
     // Account name configuration from environment variable
     // Authentication uses DefaultAzureCredential which supports:
     // - Environment variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET)
