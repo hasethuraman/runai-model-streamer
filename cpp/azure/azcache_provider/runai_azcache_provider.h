@@ -132,6 +132,9 @@ typedef uint32_t (*runai_cache_abi_version_fn)(void);
 /* Environment variable pointing to the cache provider .so path (explicit override) */
 #define RUNAI_AZURE_CACHE_LIB_ENV "RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB"
 
+/* Environment variable for the cache provider package name used in auto-discovery */
+#define RUNAI_AZURE_CACHE_PACKAGE_ENV "RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_PACKAGE"
+
 #ifdef __cplusplus
 }
 #endif

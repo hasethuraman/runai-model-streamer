@@ -20,8 +20,7 @@ std::mutex AzCacheProviderLoader::s_handle_mutex;
 namespace
 {
 
-// Known cache provider package/library names for auto-discovery
-constexpr const char* CACHE_PROVIDER_PACKAGE = "py_tachyon_client";
+// Default cache provider library name for auto-discovery
 constexpr const char* CACHE_PROVIDER_LIB = "libStorageDirect.so";
 
 /**
@@ -33,6 +32,14 @@ constexpr const char* CACHE_PROVIDER_LIB = "libStorageDirect.so";
  */
 std::string autodiscover_cache_lib()
 {
+    std::string package_name;
+    if (!utils::try_getenv<std::string>(RUNAI_AZURE_CACHE_PACKAGE_ENV, package_name) || package_name.empty())
+    {
+        LOG(DEBUG) << "AzCacheProvider: " << RUNAI_AZURE_CACHE_PACKAGE_ENV
+                   << " not set — skipping auto-discovery";
+        return {};
+    }
+
     Dl_info info;
     auto fn_ptr = reinterpret_cast<void*>(&autodiscover_cache_lib);
     if (!dladdr(fn_ptr, &info) || !info.dli_fname)
@@ -52,7 +59,7 @@ std::string autodiscover_cache_lib()
 
     // libstreamerazure.so → lib/ → libstreamer/ → runai_model_streamer/ → site-packages/
     auto site_packages = azure_so.parent_path().parent_path().parent_path().parent_path();
-    auto candidate = site_packages / CACHE_PROVIDER_PACKAGE / CACHE_PROVIDER_LIB;
+    auto candidate = site_packages / package_name / CACHE_PROVIDER_LIB;
 
     if (std::filesystem::exists(candidate, ec) && !ec)
     {
