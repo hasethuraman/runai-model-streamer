@@ -6,7 +6,7 @@ import os
 import posixpath
 from pathlib import Path
 
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobServiceClient, BlobProperties
 
 
 # Application ID for telemetry (prepended to User-Agent)
@@ -173,18 +173,19 @@ def list_files(
     paths = []
     if recursive:
         # Recursive: list all blobs under the prefix
-        blob_items = container_client.list_blobs(name_starts_with=prefix)
+        blob_items = container_client.list_blobs(name_starts_with=prefix, include=["metadata"])
         for item in blob_items:
-            if hasattr(item, 'name'):
+            if hasattr(item, 'name') and not _is_adls_directory(item):
                 paths.append(item.name)
     else:
         # Non-recursive: use walk_blobs with delimiter to only get blobs at this level
         # This is more efficient as Azure service handles the filtering
-        blob_items = container_client.walk_blobs(name_starts_with=prefix, delimiter='/')
+        blob_items = container_client.walk_blobs(name_starts_with=prefix, delimiter='/', include=["metadata"])
         for item in blob_items:
             # walk_blobs returns BlobProperties for blobs and BlobPrefix for directories
             # We only want blobs (files), not prefixes (directories)
-            if hasattr(item, 'name') and not item.name.endswith('/'):
+
+            if hasattr(item, 'name') and not item.name.endswith('/') and not _is_adls_directory(item):
                 paths.append(item.name)
 
     # Filter out directories (blobs ending with /)
@@ -218,3 +219,14 @@ def removeprefix(s: str, prefix: str) -> str:
     if s.startswith(prefix):
         return s[len(prefix):]
     return s
+
+def _is_adls_directory(blob: BlobProperties) -> bool:
+    # When listing against ADLS, we might hit directory stubs (hdi_isfolder=true) that don't have a trailing slash
+    # So, we use metadata to filter them out
+    return (
+        blob.size == 0
+        and blob.metadata is not None
+        and (blob.metadata.get("hdi_isfolder") == "true" 
+            or blob.metadata.get("Hdi_isfolder") == "true" # Sometimes, the service returns this metadata key capitalized 
+            )
+    )
