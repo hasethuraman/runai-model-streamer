@@ -1,5 +1,5 @@
 from runai_model_streamer.libstreamer import dll, t_streamer
-from typing import List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 import ctypes
 
 from runai_model_streamer.s3_utils.s3_utils import (
@@ -93,3 +93,62 @@ def runai_response(streamer: t_streamer) -> Optional[Tuple[int, int]]:
 
 def runai_response_str(response_code: int) -> str:
     return dll.fn_runai_response_str(response_code)
+
+
+def runai_list_files(
+    prefix: str,
+    callback: Callable[[str, int], None],
+    is_recursive: bool = True,
+    allow_patterns: Optional[List[str]] = None,
+    ignore_patterns: Optional[List[str]] = None,
+    params: Optional[Dict[str, str]] = None,
+) -> None:
+    # Exceptions raised inside a ctypes callback do not propagate through the C
+    # call (they are routed to sys.unraisablehook). Capture the first one and
+    # re-raise it after runai_list_files returns so callers can detect failures.
+    callback_error: List[Exception] = []
+
+    @dll.RunaiFileListCallback
+    def _cb(path: bytes, size: int, _user_data: None) -> None:
+        if callback_error:
+            return
+        try:
+            callback(path.decode("utf-8"), size)
+        except Exception as exc:
+            callback_error.append(exc)
+
+    def make_pattern_array(patterns):
+        if not patterns:
+            return None, 0
+        arr = (ctypes.c_char_p * len(patterns))(
+            *[p.encode("utf-8") for p in patterns]
+        )
+        return arr, len(patterns)
+
+    allow_arr, num_allow = make_pattern_array(allow_patterns)
+    ignore_arr, num_ignore = make_pattern_array(ignore_patterns)
+
+    param_items = list((params or {}).items())
+    if param_items:
+        keys_arr   = (ctypes.c_char_p * len(param_items))(*[k.encode("utf-8") for k, _ in param_items])
+        values_arr = (ctypes.c_char_p * len(param_items))(*[v.encode("utf-8") for _, v in param_items])
+        num_params = len(param_items)
+    else:
+        keys_arr = values_arr = None
+        num_params = 0
+
+    error_code = dll.fn_runai_list_files(
+        prefix.encode("utf-8"),
+        int(is_recursive),
+        allow_arr, num_allow,
+        ignore_arr, num_ignore,
+        _cb, None,
+        keys_arr, values_arr, num_params,
+    )
+    # a callback failure is the root cause, so surface it before the error code
+    if callback_error:
+        raise callback_error[0]
+    if error_code != SUCCESS_ERROR_CODE:
+        raise ValueError(
+            f"runai_list_files failed: {runai_response_str(error_code)}"
+        )

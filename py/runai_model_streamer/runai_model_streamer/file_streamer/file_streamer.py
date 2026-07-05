@@ -1,10 +1,11 @@
-from typing import List, Iterator, Optional
+from typing import Dict, List, Iterator, Optional, Tuple
 from timeit import default_timer as timer
 from runai_model_streamer.libstreamer.libstreamer import (
     runai_start,
     runai_end,
     runai_request,
-    runai_response
+    runai_response,
+    runai_list_files,
 )
 from runai_model_streamer.file_streamer.requests_iterator import (
     FilesRequestsIteratorWithBuffer,
@@ -53,6 +54,13 @@ def homogeneous_paths(paths: List[str]) -> bool:
     return True
 
 class FileStreamer:
+    def __init__(self) -> None:
+        # Initialized here (not only in __enter__) so methods such as list_files
+        # can be used without entering the context manager
+        self.streamer = None
+        self.s3_session = None
+        self.s3_credentials = None
+
     def __enter__(self) -> "FileStreamer":
         self.streamer = runai_start()
         self.start_time = timer()
@@ -83,6 +91,44 @@ class FileStreamer:
                 self.s3_session, self.s3_credentials = s3_credentials_module.get_credentials(credentials)
         return path
 
+
+    def list_files(
+        self,
+        prefix: str,
+        is_recursive: bool = True,
+        allow_patterns: Optional[List[str]] = None,
+        ignore_patterns: Optional[List[str]] = None,
+        credentials: Optional[S3Credentials] = None,
+    ) -> List[Tuple[str, int]]:
+        # Resolve credentials through the same path as streaming: this creates and
+        # retains the boto3 session (self.s3_session) and the resolved credentials
+        # (self.s3_credentials) for s3 paths
+        self.handle_object_store(prefix, credentials)
+
+        params: Optional[Dict[str, str]] = None
+        if self.s3_credentials is not None:
+            params = {}
+            if self.s3_credentials.access_key_id:
+                params["key"] = self.s3_credentials.access_key_id
+            if self.s3_credentials.secret_access_key:
+                params["secret"] = self.s3_credentials.secret_access_key
+            if self.s3_credentials.session_token:
+                params["token"] = self.s3_credentials.session_token
+            if self.s3_credentials.region_name:
+                params["region"] = self.s3_credentials.region_name
+            if self.s3_credentials.endpoint:
+                params["endpoint"] = self.s3_credentials.endpoint
+
+        results: List[Tuple[str, int]] = []
+        runai_list_files(
+            prefix,
+            lambda path, size: results.append((path, size)),
+            is_recursive=is_recursive,
+            allow_patterns=allow_patterns,
+            ignore_patterns=ignore_patterns,
+            params=params,
+        )
+        return results
 
     def stream_files(
             self,

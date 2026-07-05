@@ -1,6 +1,10 @@
 
+#include <aws/core/auth/AWSCredentials.h>
+#include <aws/core/auth/AWSCredentialsProvider.h>
+#include <aws/core/config/ConfigAndCredentialsCacheManager.h>
 #include <aws/core/http/Scheme.h>
 #include <aws/s3-crt/model/GetObjectRequest.h>
+#include <aws/s3-crt/model/ListObjectsV2Request.h>
 
 #include <cstring>
 #include <algorithm>
@@ -91,6 +95,17 @@ S3ClientBase::S3ClientBase(const common::backend_api::ObjectClientConfig_t & con
             }
         }
     }
+
+    // Build explicit credentials when an access key was provided; otherwise leave
+    // _client_credentials null so the client falls back to the AWS default
+    // credential provider chain (environment, profile, SSO, IMDS, etc.)
+    if (_key.has_value() && _secret.has_value())
+    {
+        _client_credentials = std::make_unique<Aws::Auth::AWSCredentials>(
+            _key.value(),
+            _secret.value(),
+            _token.has_value() ? _token.value() : Aws::String(""));
+    }
 }
 
 bool S3ClientBase::verify_credentials_member(const std::optional<Aws::String>& member, const std::optional<Aws::String>& value, const char * name) const
@@ -168,7 +183,20 @@ S3Client::S3Client(const common::backend_api::ObjectClientConfig_t & config) :
         _client_config.config.region = _region.value();
     }
 
-    if (utils::try_getenv("AWS_CA_BUNDLE", _client_config.config.caFile))
+    // Resolve the TLS CA bundle: the AWS_CA_BUNDLE environment variable takes
+    // precedence; otherwise fall back to the "ca_bundle" setting in the shared
+    // AWS config profile (~/.aws/config), matching boto3/aws-cli behavior. The
+    // config file is already parsed and cached by Aws::InitAPI (see s3_init).
+    if (!utils::try_getenv("AWS_CA_BUNDLE", _client_config.config.caFile))
+    {
+        const auto ca_bundle = Aws::Config::GetCachedConfigValue(Aws::Auth::GetConfigProfileName(), "ca_bundle");
+        if (!ca_bundle.empty())
+        {
+            _client_config.config.caFile = ca_bundle;
+        }
+    }
+
+    if (!_client_config.config.caFile.empty())
     {
         LOG(DEBUG) << "Setting s3 configuration ca certificate file to " << _client_config.config.caFile;
 
@@ -307,6 +335,59 @@ void S3Client::stop()
     {
         _responder->stop();
     }
+}
+
+common::ResponseCode S3Client::list_files(
+    const char* prefix,
+    int is_recursive,
+    std::vector<std::pair<std::string, size_t>>& results)
+{
+    const auto uri = common::s3::StorageUri(prefix);
+
+    Aws::S3Crt::Model::ListObjectsV2Request request;
+    request.SetBucket(uri.bucket.c_str());
+    request.SetPrefix(uri.path.c_str());
+    if (!is_recursive)
+    {
+        request.SetDelimiter("/");
+    }
+
+    const std::string uri_prefix = uri.scheme + "://" + uri.bucket + "/";
+
+    bool done = false;
+    while (!done)
+    {
+        auto outcome = _client->ListObjectsV2(request);
+        if (!outcome.IsSuccess())
+        {
+            const auto& err = outcome.GetError();
+            LOG(ERROR) << "S3 ListObjectsV2 failed: " << err.GetExceptionName() << ": " << err.GetMessage();
+            return common::ResponseCode::FileAccessError;
+        }
+
+        const auto& result = outcome.GetResult();
+        for (const auto& obj : result.GetContents())
+        {
+            const auto& key = obj.GetKey();
+            // skip zero-byte directory marker objects (keys ending with "/")
+            if (!key.empty() && key.back() == '/')
+            {
+                continue;
+            }
+            results.emplace_back(uri_prefix + std::string(key), static_cast<size_t>(obj.GetSize()));
+        }
+
+        if (result.GetIsTruncated())
+        {
+            request.SetContinuationToken(result.GetNextContinuationToken());
+        }
+        else
+        {
+            done = true;
+        }
+    }
+
+    return common::ResponseCode::Success;
 }
 
 }; // namespace runai::llm::streamer::impl::s3

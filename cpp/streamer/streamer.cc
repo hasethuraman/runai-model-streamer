@@ -4,7 +4,9 @@
 #include <string>
 #include <vector>
 
+#include "common/exception/exception.h"
 #include "common/response_code/response_code.h"
+#include "common/s3_credentials/s3_credentials.h"
 #include "streamer/impl/streamer/streamer.h"
 
 namespace runai::llm::streamer
@@ -161,6 +163,62 @@ _RUNAI_EXTERN_C const char * runai_response_str(int response_code)
     }
 
     return unexpected_error;
+}
+
+_RUNAI_EXTERN_C int runai_list_files(
+    const char *          prefix,
+    int                   is_recursive,
+    const char **         allow_patterns,
+    unsigned              num_allow_patterns,
+    const char **         ignore_patterns,
+    unsigned              num_ignore_patterns,
+    RunaiFileListCallback callback,
+    void *                user_data,
+    const char **         param_keys,
+    const char **         param_values,
+    unsigned              num_params)
+{
+    try
+    {
+        if (!prefix || !callback)
+            return static_cast<int>(common::ResponseCode::InvalidParameterError);
+
+        const char *key = nullptr, *secret = nullptr, *token = nullptr,
+                   *region = nullptr, *endpoint = nullptr;
+        for (unsigned i = 0; i < num_params; ++i)
+        {
+            if (!param_keys || !param_keys[i]) continue;
+            const std::string k(param_keys[i]);
+            const char* v = param_values ? param_values[i] : nullptr;
+            if      (k == "key")      key      = v;
+            else if (k == "secret")   secret   = v;
+            else if (k == "token")    token    = v;
+            else if (k == "region")   region   = v;
+            else if (k == "endpoint") endpoint = v;
+        }
+        common::s3::Credentials credentials(key, secret, token, region, endpoint);
+
+        std::vector<std::string> allow, ignore;
+        for (unsigned i = 0; allow_patterns && i < num_allow_patterns; ++i) allow.emplace_back(allow_patterns[i]);
+        for (unsigned i = 0; ignore_patterns && i < num_ignore_patterns; ++i) ignore.emplace_back(ignore_patterns[i]);
+
+        impl::Streamer streamer;
+        const auto files = streamer.list_files(prefix, is_recursive != 0, allow, ignore, credentials);
+        for (const auto & entry : files)
+        {
+            callback(entry.first.c_str(), entry.second, user_data);
+        }
+
+        return static_cast<int>(common::ResponseCode::Success);
+    }
+    catch (const common::Exception & e)
+    {
+        return static_cast<int>(e.error());
+    }
+    catch (...)
+    {
+    }
+    return static_cast<int>(common::ResponseCode::UnknownError);
 }
 
 } // namespace runai::llm::streamer
