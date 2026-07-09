@@ -27,6 +27,12 @@ typedef enum {
 
 using ResponseCode_t = common::ResponseCode;
 
+// Multiplier applied to a backend's raw in-flight capacity when advertising
+// max_inflight_bytes (see obj_get_backend_config), giving completion-driven refill enough
+// headroom to keep the backend busy during the completion -> resubmit round-trip.
+// Defaults to 1.5; override with RUNAI_STREAMER_INFLIGHT_WINDOW_MARGIN (a positive float).
+double inflight_window_margin();
+
 // --- Config Params ---
 struct ObjectConfigParam_t
 {

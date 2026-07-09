@@ -1,6 +1,7 @@
 #include <regex>
 #include <vector>
 #include <chrono>
+#include <cstdlib>
 
 #include "common/s3_wrapper/s3_wrapper.h"
 #include "common/s3_credentials/s3_credentials.h"
@@ -51,6 +52,43 @@ const common::backend_api::ObjectClientConfig_t S3ClientWrapper::Params::to_conf
     config.initial_params = initial_params.data();
     config.default_storage_chunk_size = chunk_bytesize;
     return config;
+}
+
+size_t S3ClientWrapper::max_inflight_bytes()
+{
+    constexpr size_t unbounded = static_cast<size_t>(-1);
+
+    if (_backend_handle == nullptr)
+    {
+        return unbounded;
+    }
+
+    try
+    {
+        auto get_config_ = _backend_handle->dylib_ptr->dlsym<common::backend_api::ResponseCode_t(*)(
+            common::backend_api::ObjectBackendHandle_t, const char*, char*, unsigned int*)>("obj_get_backend_config");
+        if (get_config_ == nullptr)
+        {
+            return unbounded;
+        }
+
+        char buf[32] = {0};
+        unsigned int len = sizeof(buf);
+        auto ret = get_config_(_backend_handle->backend_handle(), "max_inflight_bytes", buf, &len);
+        if (ret != ResponseCode::Success)
+        {
+            return unbounded;
+        }
+        buf[sizeof(buf) - 1] = '\0';
+        return static_cast<size_t>(std::strtoull(buf, nullptr, 10));
+    }
+    catch (...)
+    {
+        // Defensive fallback: all current object-storage plugins (s3 / gcs / azure and the
+        // s3 mock) export obj_get_backend_config, but an older or third-party plugin may not.
+        // dlsym throws for a missing symbol -> treat the window as unbounded.
+        return unbounded;
+    }
 }
 
 const utils::Semver min_glibc_semver = utils::Semver(description(static_cast<int>(ResponseCode::GlibcPrerequisite)));
