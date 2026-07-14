@@ -217,11 +217,11 @@ export AZURE_STORAGE_SAS_TOKEN="sv=2021-08-06&ss=b&srt=co&sp=rl&se=2026-01-01T00
 
 > **Experimental** — This feature is under active development and may change in future releases.
 
-The streamer supports pluggable cache providers for Azure Blob Storage. When a compatible cache provider package is installed (e.g., `tachyon-client`), it is auto-discovered and loaded at runtime. All blob reads are then routed through the cache provider instead of the Azure SDK, enabling integration with distributed caches to accelerate model loading.
+The streamer supports pluggable cache providers for Azure Blob Storage. When a compatible cache provider package is installed (e.g., `dacs-client`), it is auto-discovered and loaded at runtime. All blob reads are then routed through the cache provider instead of the Azure SDK, enabling integration with distributed caches to accelerate model loading.
 
 ###### How it works
 
-1. Install the cache provider package alongside `runai-model-streamer` (e.g., `pip install tachyon-client`)
+1. Install the cache provider package alongside `runai-model-streamer` (e.g., `pip install dacs-client`)
 2. At startup, the streamer auto-discovers the cache library in Python site-packages via `dladdr`
 3. The library is loaded via `dlopen` and the `blob_read` symbol is resolved
 4. All subsequent Azure blob reads are served through the cache provider
@@ -274,7 +274,7 @@ export RUNAI_STREAMER_LOG_LEVEL=DEBUG
 
 You should see:
 ```text
-AzCacheProvider: auto-discovered cache library: /path/to/site-packages/py_tachyon_client/libStorageDirect.so
+AzCacheProvider: auto-discovered cache library: /path/to/site-packages/dacs_client/libStorageDirect.so
 AzCacheProvider: cache provider loaded successfully from /path/to/...
 ```
 
