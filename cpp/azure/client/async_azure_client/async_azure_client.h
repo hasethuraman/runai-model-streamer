@@ -21,13 +21,16 @@ typedef std::function<void(common::ResponseCode response_code, const std::string
 struct DownloadBlobTask {
     DownloadBlobFn taskFn;
     CompletionCallback callback;
+    int chunk_counter;
 
 public:
     void execute();
 };
 
 inline DownloadBlobFn createDownloadBlobFn(
+    int chunk_counter,
     std::shared_ptr<Azure::Storage::Blobs::BlobServiceClient> client,
+    const std::string& account_name,
     const std::string& container_name,
     const std::string& blob_name,
     char* buffer,
@@ -35,14 +38,17 @@ inline DownloadBlobFn createDownloadBlobFn(
     size_t length)
 {
     // Explicitly copy strings to ensure they're captured properly
+    std::string account = account_name;
     std::string container = container_name;
     std::string blob = blob_name;
     
-    return [client, container, blob, buffer, offset, length]() {
+    return [client, account, container, blob, buffer, offset, length, chunk_counter]() {
         using namespace Azure::Storage::Blobs;
         auto container_client = client->GetBlobContainerClient(container);
         auto blob_client = container_client.GetBlockBlobClient(blob);
-        
+        LOG(INFO) << "Reading from blob: " << account << "/" << container << "/" << blob
+            << " offset=" << offset << " length=" << length << " chunk_counter=" << chunk_counter;
+
         DownloadBlobToOptions download_options;
         download_options.Range = Azure::Core::Http::HttpRange();
         download_options.Range.Value().Offset = offset;
@@ -86,12 +92,16 @@ public:
         size_t length,
         CompletionCallback callback)
     {
+        std::shared_ptr<std::atomic<unsigned>> chunk_read_counter = std::make_shared<std::atomic<unsigned>>(0);
+        int chunk_counter = chunk_read_counter->fetch_add(1);
         if (_cache_enabled)
         {
             // Capture shared_ptr to loader to ensure lifetime
             auto loader = _cache_loader;
             DownloadBlobTask task{
-                [loader, account_name, container_name, blob_name, buffer, offset, length]() {
+                [loader, account_name, container_name, blob_name, buffer, offset, length, chunk_counter]() {
+                    LOG(INFO) << "Reading from cache provider for blob: " << account_name << "/" << container_name << "/" << blob_name
+                              << " offset=" << offset << " length=" << length << " chunk_counter=" << chunk_counter;
                     bool ok = loader->read(
                         account_name, container_name, blob_name, buffer, offset, length);
                     if (!ok)
@@ -99,19 +109,21 @@ public:
                         throw std::runtime_error("Cache provider read failed");
                     }
                 },
-                std::move(callback)
+                std::move(callback),
+                chunk_counter
             };
             push_task(std::move(task));
         }
         else
         {
-            DownloadBlobFn downloadFn = createDownloadBlobFn(_client, container_name, blob_name, buffer, offset, length);
+            DownloadBlobFn downloadFn = createDownloadBlobFn(
+                chunk_counter, _client, account_name, container_name, blob_name, buffer, offset, length);
 
             DownloadBlobTask task{
                 std::move(downloadFn),
-                std::move(callback)
+                std::move(callback),
+                chunk_counter
             };
-
             push_task(std::move(task));
         }
     }

@@ -12,6 +12,7 @@ namespace runai::llm::streamer::impl::azure
 void DownloadBlobTask::execute() {
     try {
         taskFn();
+        LOG(INFO) << "DownloadBlobTask executed successfully for chunk_counter=" << chunk_counter;
         callback(common::ResponseCode::Success, "");
     } catch (const Azure::Core::RequestFailedException& e) {
         std::string error_msg = "Azure RequestFailed: StatusCode=" + std::to_string(static_cast<int>(e.StatusCode)) + " " + e.what();
@@ -23,8 +24,10 @@ void DownloadBlobTask::execute() {
             // 416 Range Not Satisfiable - requested range is past EOF
             code = common::ResponseCode::EofError;
         }
+        LOG(INFO) << "DownloadBlobTask failed for chunk_counter=" << chunk_counter;
         callback(code, error_msg);
     } catch (const std::exception& e) {
+        LOG(ERROR) << "DownloadBlobTask encountered an exception for chunk_counter=" << chunk_counter << ": " << e.what();
         callback(common::ResponseCode::FileAccessError, e.what());
     }
 }

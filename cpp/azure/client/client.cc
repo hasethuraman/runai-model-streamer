@@ -296,6 +296,7 @@ common::ResponseCode AzureClient::async_read(const char* path,
             bytesize_,
             [request_id, counter, is_success, responder](common::ResponseCode response_code, const std::string& error_msg) {
                 if (response_code == common::ResponseCode::Success) {
+                    LOG(INFO) << "Async read response for blob request " << request_id << " succeeded";
                     const auto running = counter->fetch_sub(1);
                     LOG(SPAM) << "Async read request " << request_id << " succeeded - " << running << " running";
                     
