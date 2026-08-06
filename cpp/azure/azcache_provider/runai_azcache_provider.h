@@ -46,6 +46,7 @@
 #ifndef RUNAI_STREAMER_AZCACHE_PROVIDER_H
 #define RUNAI_STREAMER_AZCACHE_PROVIDER_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -90,8 +91,30 @@ typedef ssize_t (*blob_read_fn)(
     char* error_buf,
     size_t error_buf_size);
 
+typedef ssize_t (*cache_upload_fn)(
+    const char* account,
+    const char* container,
+    const char* blob,
+    const void* buf,
+    size_t offset,
+    size_t length,
+    char* error_buf,
+    size_t error_buf_size);
+
+typedef ssize_t (*cache_download_fn)(
+    const char* account,
+    const char* container,
+    const char* blob,
+    void* buf,
+    size_t offset,
+    size_t length,
+    char* error_buf,
+    size_t error_buf_size);
+
 /* Symbol name that the cache provider .so must export */
 #define BLOB_READ_SYMBOL "blob_read"
+#define CACHE_UPLOAD_SYMBOL "cache_upload"
+#define CACHE_DOWNLOAD_SYMBOL "cache_download"
 
 /*
  * Optional: graceful shutdown of the cache provider.

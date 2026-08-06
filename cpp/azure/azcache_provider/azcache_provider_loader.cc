@@ -89,6 +89,8 @@ CacheMode parse_cache_mode(const std::string& val)
 CacheLibHandle::CacheLibHandle(const std::string& path, CacheMode mode)
     : lib_handle(nullptr),
       read_fn(nullptr),
+            upload_fn(nullptr),
+            download_fn(nullptr),
       close_fn(nullptr),
       lib_path(path)
 {
@@ -166,6 +168,25 @@ CacheLibHandle::CacheLibHandle(const std::string& path, CacheMode mode)
         return;
     }
 
+    // Resolve the CacheClient convenience API when exported by the provider.
+    try
+    {
+        upload_fn = utils::Dylib::dlsym<cache_upload_fn>(lib_handle, CACHE_UPLOAD_SYMBOL);
+    }
+    catch (...)
+    {
+        upload_fn = nullptr;
+    }
+
+    try
+    {
+        download_fn = utils::Dylib::dlsym<cache_download_fn>(lib_handle, CACHE_DOWNLOAD_SYMBOL);
+    }
+    catch (...)
+    {
+        download_fn = nullptr;
+    }
+
     // Resolve shutdown (optional — don't throw if missing)
     try
     {
@@ -187,7 +208,7 @@ CacheLibHandle::~CacheLibHandle()
         return;
     }
 
-    // Call shutdown() for graceful shutdown before releasing the handle
+    // Call shutdown() for graceful shutdown.
     if (close_fn)
     {
         LOG(INFO) << "AzCacheProvider: calling shutdown() for graceful shutdown";
@@ -205,6 +226,34 @@ CacheLibHandle::~CacheLibHandle()
     lib_handle = nullptr;
 
     LOG(INFO) << "AzCacheProvider: released cache provider handle";
+}
+
+ssize_t CacheLibHandle::upload(
+    const char* account,
+    const char* container,
+    const char* blob,
+    const void* buffer,
+    std::size_t offset,
+    std::size_t length,
+    char* error_buffer,
+    std::size_t error_buffer_size)
+{
+    return upload_fn(account, container, blob, buffer, offset, length,
+                     error_buffer, error_buffer_size);
+}
+
+ssize_t CacheLibHandle::download(
+    const char* account,
+    const char* container,
+    const char* blob,
+    void* buffer,
+    std::size_t offset,
+    std::size_t length,
+    char* error_buffer,
+    std::size_t error_buffer_size)
+{
+    return download_fn(account, container, blob, buffer, offset, length,
+                       error_buffer, error_buffer_size);
 }
 
 // --- AzCacheProviderLoader implementation ---
@@ -293,7 +342,8 @@ AzCacheProviderLoader::AzCacheProviderLoader(const CacheProviderConfig& config)
         }
     }
 
-    if (_handle && _handle->read_fn)
+    if (_handle && _handle->lib_handle && _handle->read_fn &&
+        _handle->upload_fn && _handle->download_fn)
     {
         _enabled = true;
     }
@@ -346,6 +396,64 @@ bool AzCacheProviderLoader::read(
 
     LOG(SPAM) << "AzCacheProvider: cache read " << length << " bytes from "
               << account << "/" << container << "/" << blob << " offset=" << offset;
+    return true;
+}
+
+bool AzCacheProviderLoader::upload(
+    const std::string& account,
+    const std::string& container,
+    const std::string& blob,
+    const char* buffer,
+    size_t offset,
+    size_t length)
+{
+    if (!_enabled || !_handle || !_handle->upload_fn)
+    {
+        return false;
+    }
+
+    char error_buffer[RUNAI_CACHE_ERROR_BUF_SIZE] = {};
+    const ssize_t bytes_uploaded = _handle->upload(
+        account.c_str(), container.c_str(), blob.c_str(), buffer, offset, length,
+        error_buffer, sizeof(error_buffer));
+    if (bytes_uploaded < 0 || static_cast<std::size_t>(bytes_uploaded) != length)
+    {
+        LOG(ERROR) << "AzCacheProvider: upload failed for "
+                   << account << "/" << container << "/" << blob
+                   << " offset=" << offset << " length=" << length
+                   << (error_buffer[0] ? ": " + std::string(error_buffer) : "");
+        return false;
+    }
+
+    return true;
+}
+
+bool AzCacheProviderLoader::download(
+    const std::string& account,
+    const std::string& container,
+    const std::string& blob,
+    char* buffer,
+    size_t offset,
+    size_t length)
+{
+    if (!_enabled || !_handle || !_handle->download_fn)
+    {
+        return false;
+    }
+
+    char error_buffer[RUNAI_CACHE_ERROR_BUF_SIZE] = {};
+    const ssize_t bytes_downloaded = _handle->download(
+        account.c_str(), container.c_str(), blob.c_str(), buffer, offset, length,
+        error_buffer, sizeof(error_buffer));
+    if (bytes_downloaded < 0 || static_cast<std::size_t>(bytes_downloaded) != length)
+    {
+        LOG(ERROR) << "AzCacheProvider: download failed for "
+                   << account << "/" << container << "/" << blob
+                   << " offset=" << offset << " length=" << length
+                   << (error_buffer[0] ? ": " + std::string(error_buffer) : "");
+        return false;
+    }
+
     return true;
 }
 

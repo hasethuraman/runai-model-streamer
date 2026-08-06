@@ -42,8 +42,28 @@ struct CacheLibHandle
     CacheLibHandle(const CacheLibHandle&) = delete;
     CacheLibHandle& operator=(const CacheLibHandle&) = delete;
 
+    ssize_t upload(const char* account,
+                   const char* container,
+                   const char* blob,
+                   const void* buffer,
+                   std::size_t offset,
+                   std::size_t length,
+                   char* error_buffer,
+                   std::size_t error_buffer_size);
+
+    ssize_t download(const char* account,
+                     const char* container,
+                     const char* blob,
+                     void* buffer,
+                     std::size_t offset,
+                     std::size_t length,
+                     char* error_buffer,
+                     std::size_t error_buffer_size);
+
     void* lib_handle;
     blob_read_fn read_fn;
+    cache_upload_fn upload_fn;
+    cache_download_fn download_fn;
     shutdown_fn close_fn;  // may be nullptr if not exported
     std::string lib_path;
 };
@@ -98,9 +118,22 @@ public:
               size_t offset,
               size_t length);
 
+    bool upload(const std::string& account,
+                const std::string& container,
+                const std::string& blob,
+                const char* buffer,
+                size_t offset,
+                size_t length);
+
+    bool download(const std::string& account,
+                  const std::string& container,
+                  const std::string& blob,
+                  char* buffer,
+                  size_t offset,
+                  size_t length);
+
     AzCacheProviderLoader(const AzCacheProviderLoader&) = delete;
     AzCacheProviderLoader& operator=(const AzCacheProviderLoader&) = delete;
-
 private:
     std::shared_ptr<CacheLibHandle> _handle;
     bool _enabled;

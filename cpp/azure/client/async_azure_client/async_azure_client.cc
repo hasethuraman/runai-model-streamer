@@ -34,7 +34,13 @@ AsyncAzureClient::AsyncAzureClient(
     unsigned int max_pool_size,
     std::shared_ptr<AzCacheProviderLoader> cache_loader) :
     _client(client),
-    _pool([](DownloadBlobTask&& task, std::atomic<bool>& stopped) {
+    _cache_upload_pool([](WriteToCacheTask&& task, std::atomic<bool>& stopped) {
+        task.execute();
+    }, max_pool_size),
+    _cache_download_pool([](ReadFromCacheTask&& task, std::atomic<bool>& stopped) {
+        task.execute();
+    }, max_pool_size),
+    _download_pool([](DownloadBlobTask&& task, std::atomic<bool>& stopped) {
         task.execute();
     }, max_pool_size),
     _cache_loader(std::move(cache_loader)),
@@ -44,7 +50,43 @@ AsyncAzureClient::AsyncAzureClient(
 
 void AsyncAzureClient::push_task(DownloadBlobTask&& task)
 {
-    _pool.push(std::move(task));
+    _download_pool.push(std::move(task));
+}
+
+void AsyncAzureClient::push_task(WriteToCacheTask&& task)
+{
+    _cache_upload_pool.push(std::move(task));
+}
+
+void AsyncAzureClient::push_task(ReadFromCacheTask&& task)
+{
+    _cache_download_pool.push(std::move(task));
+}
+
+void WriteToCacheTask::execute()
+{
+    try
+    {
+        taskFn();
+        callback(common::ResponseCode::Success, "");
+    }
+    catch (const std::exception& e)
+    {
+        callback(common::ResponseCode::FileAccessError, e.what());
+    }
+}
+
+void ReadFromCacheTask::execute()
+{
+    try
+    {
+        taskFn();
+        callback(common::ResponseCode::Success, "");
+    }
+    catch (const std::exception& e)
+    {
+        callback(common::ResponseCode::FileAccessError, e.what());
+    }
 }
 
 }; // namespace runai::llm::streamer::impl::azure

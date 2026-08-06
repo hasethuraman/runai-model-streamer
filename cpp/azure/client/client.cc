@@ -255,25 +255,21 @@ common::ResponseCode AzureClient::async_read(const char* path,
     // Split range into chunks.
     // When a cache provider is loaded, issue a single read per range
     // so the provider can handle alignment and prefetching internally.
-    size_t num_chunks;
-    if (_async_client->is_cache_enabled())
-    {
-        num_chunks = 1;
-    }
-    else
-    {
-        num_chunks = std::max(1UL, range.length / _chunk_bytesize);
-    }
+    size_t num_chunks = std::max(1UL, range.length / _chunk_bytesize);
     LOG(SPAM) << "Number of chunks is: " << num_chunks;
 
     // Counter for tracking chunk completions
     auto counter = std::make_shared<std::atomic<unsigned>>(num_chunks);
     auto is_success = std::make_shared<std::atomic<bool>>(true);
+    auto async_client = _async_client.get();
+    // a map of char * and integer
+    auto fd_map = std::make_shared<std::unordered_map<char *, int>>();
 
     // Parse Azure URI az://container/blob
     const auto uri = common::s3::StorageUri(path);
     std::string container_name(uri.bucket);
     std::string blob_name(uri.path);
+    std::string account_name = _account_name.value_or("");
 
     size_t total_ = range.length;
     size_t offset_ = range.offset;
@@ -288,16 +284,29 @@ common::ResponseCode AzureClient::async_read(const char* path,
         
         // Launch async download with callback - AsyncAzureClient ThreadPool handles both download and callback
         _async_client->DownloadBlobRangeAsync(
-            _account_name.value_or(""),
+            account_name,
             container_name,
             blob_name,
             chunk_buffer,
             chunk_offset,
             bytesize_,
-            [request_id, counter, is_success, responder](common::ResponseCode response_code, const std::string& error_msg) {
+            [request_id, account_name, container_name, blob_name, chunk_buffer, chunk_offset, bytesize_, counter, is_success, responder, async_client](common::ResponseCode response_code, const std::string& error_msg) {
                 if (response_code == common::ResponseCode::Success) {
                     const auto running = counter->fetch_sub(1);
                     LOG(SPAM) << "Async read request " << request_id << " succeeded - " << running << " running";
+                    async_client->UploadBlobRangeToCacheAsync(
+                        account_name,
+                        container_name,
+                        blob_name,
+                        chunk_buffer,
+                        chunk_offset,
+                        bytesize_,
+                        [request_id](common::ResponseCode response_code, const std::string& error_msg) {
+                            if (response_code != common::ResponseCode::Success) {
+                                LOG(ERROR) << "Failed to write to cache for request " << request_id << ": " << error_msg;
+                            }
+                        }
+                    );
                     
                     if (running == 1) {
                         common::backend_api::Response r(request_id, common::ResponseCode::Success);

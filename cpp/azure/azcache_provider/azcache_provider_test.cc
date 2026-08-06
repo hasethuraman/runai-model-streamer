@@ -300,6 +300,41 @@ TEST_F(SimpleFileCacheTest, SharedHandleMultipleLoadersSameLibrary)
     // Destroy first — cache should still work via second
     loader1.reset();
     EXPECT_TRUE(loader2->read("acct", "shared-test", "blob.bin", buf, 0, 4));
+    loader2.reset();
+}
+
+TEST_F(SimpleFileCacheTest, CacheLibHandleForwardsUploadAndDownload)
+{
+    CacheLibHandle handle(so_path_.string(), CacheMode::Required);
+    ASSERT_NE(handle.upload_fn, nullptr);
+    ASSERT_NE(handle.download_fn, nullptr);
+
+    const char upload_data[] = "data";
+    char error_buffer[RUNAI_CACHE_ERROR_BUF_SIZE] = {};
+    EXPECT_EQ(handle.upload("account", "container", "blob", upload_data, 10, 4,
+                            error_buffer, sizeof(error_buffer)),
+              4);
+
+    char download_data[4] = {};
+    EXPECT_EQ(handle.download("account", "container", "blob", download_data, 10, 4,
+                              error_buffer, sizeof(error_buffer)),
+              4);
+    EXPECT_EQ(std::string(download_data, sizeof(download_data)), "data");
+}
+
+TEST_F(SimpleFileCacheTest, UploadAndDownloadForwardBlobRange)
+{
+    CacheProviderConfig config;
+    config.mode = CacheMode::Required;
+    config.lib_path = so_path_.string();
+    AzCacheProviderLoader loader(config);
+
+    const char upload_data[] = "data";
+    EXPECT_TRUE(loader.upload("account", "container", "blob", upload_data, 10, 4));
+
+    char download_data[4] = {};
+    EXPECT_TRUE(loader.download("account", "container", "blob", download_data, 10, 4));
+    EXPECT_EQ(std::string(download_data, sizeof(download_data)), "data");
 }
 
 TEST_F(SimpleFileCacheTest, ShutdownCalledOnLastDestruction)
@@ -351,7 +386,6 @@ TEST(CacheProviderLoaderTest, DisabledModeDoesNotLoad)
     AzCacheProviderLoader loader(config);
     EXPECT_FALSE(loader.is_enabled());
 }
-
 TEST(CacheProviderLoaderTest, AutoModeNoPathDisables)
 {
     CacheProviderConfig config;
@@ -462,6 +496,7 @@ TEST(CacheProviderLoaderAbiTest, AutoModeVersionMismatchDisables)
     // .so with version returning 999 (wrong)
     std::string src = R"(
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
 uint32_t cache_abi_version(void) { return 999; }
@@ -487,6 +522,7 @@ TEST(CacheProviderLoaderAbiTest, RequiredModeVersionMismatchThrows)
     // .so with version returning 999 (wrong)
     std::string src = R"(
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
 uint32_t cache_abi_version(void) { return 999; }
@@ -511,10 +547,17 @@ TEST(CacheProviderLoaderAbiTest, AutoModeVersionMatchEnables)
     // .so with correct version and valid blob_read
     std::string src = R"(
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
 uint32_t cache_abi_version(void) { return 1; }
 ssize_t blob_read(const char* a, const char* c, const char* b,
+    void* buf, size_t offset, size_t length,
+    char* err, size_t err_sz) { return (ssize_t)length; }
+ssize_t cache_upload(const char* a, const char* c, const char* b,
+    const void* buf, size_t offset, size_t length,
+    char* err, size_t err_sz) { return (ssize_t)length; }
+ssize_t cache_download(const char* a, const char* c, const char* b,
     void* buf, size_t offset, size_t length,
     char* err, size_t err_sz) { return (ssize_t)length; }
 )";
@@ -536,10 +579,17 @@ TEST(CacheProviderLoaderAbiTest, RequiredModeVersionMatchEnables)
     // .so with correct version and valid blob_read
     std::string src = R"(
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
 uint32_t cache_abi_version(void) { return 1; }
 ssize_t blob_read(const char* a, const char* c, const char* b,
+    void* buf, size_t offset, size_t length,
+    char* err, size_t err_sz) { return (ssize_t)length; }
+ssize_t cache_upload(const char* a, const char* c, const char* b,
+    const void* buf, size_t offset, size_t length,
+    char* err, size_t err_sz) { return (ssize_t)length; }
+ssize_t cache_download(const char* a, const char* c, const char* b,
     void* buf, size_t offset, size_t length,
     char* err, size_t err_sz) { return (ssize_t)length; }
 )";

@@ -28,6 +28,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <filesystem>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -160,6 +161,51 @@ ssize_t blob_read(
     }
 
     return bytes_read;
+}
+
+__attribute__((visibility("default")))
+ssize_t cache_upload(
+    const char* account,
+    const char* container,
+    const char* blob,
+    const void* buffer,
+    size_t offset,
+    size_t length,
+    char* error_buf,
+    size_t error_buf_size)
+{
+    if (!account || strcmp(account, "account") != 0 ||
+        !container || strcmp(container, "container") != 0 ||
+        !blob || strcmp(blob, "blob") != 0 || !buffer ||
+        memcmp(buffer, "data", 4) != 0 || offset != 10 || length != 4)
+    {
+        set_error(error_buf, error_buf_size, "invalid cache_upload arguments");
+        return -1;
+    }
+    return static_cast<ssize_t>(length);
+}
+
+__attribute__((visibility("default")))
+ssize_t cache_download(
+    const char* account,
+    const char* container,
+    const char* blob,
+    void* out_buffer,
+    size_t offset,
+    size_t length,
+    char* error_buf,
+    size_t error_buf_size)
+{
+    if (!account || strcmp(account, "account") != 0 ||
+        !container || strcmp(container, "container") != 0 ||
+        !blob || strcmp(blob, "blob") != 0 || !out_buffer ||
+        offset != 10 || length != 4)
+    {
+        set_error(error_buf, error_buf_size, "invalid cache_download arguments");
+        return -1;
+    }
+    memcpy(out_buffer, "data", length);
+    return static_cast<ssize_t>(length);
 }
 
 #ifdef __cplusplus
