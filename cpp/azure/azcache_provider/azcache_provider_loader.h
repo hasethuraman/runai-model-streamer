@@ -46,6 +46,8 @@ struct CacheLibHandle
     blob_read_fn read_fn;
     shutdown_fn close_fn;  // may be nullptr if not exported
     std::string lib_path;
+    int skip_cache_header_length_bytes = 1 * 1024 * 1024;
+    int skip_cache_chunk_upto_length_bytes = 1 * 1024 * 1024;
 };
 
 /**
@@ -79,6 +81,21 @@ public:
     ~AzCacheProviderLoader();
 
     bool is_enabled() const { return _enabled; }
+    // Check if a read request is allowed to be served from the cache provider.
+    // For metadata reads, lets skip the cache provider and go directly to Azure Blob Storage.
+    // Cache provider read amplification for many metadata reads in a big model is not efficient
+    // and can cause performance issues.
+    // By default we will skip the cache provider for reads < 1MB and for reads that are within the first 1MB of the blob.
+    // Effectively for first ~2MB of the blob we will skip the cache provider and go directly to Azure Blob Storage.
+    inline bool allow_cache_request(int offset, int length) const
+    {
+        if (!_handle) return false;
+        if (offset < _handle->skip_cache_header_length_bytes && length < _handle->skip_cache_chunk_upto_length_bytes)
+        {
+            return false;
+        }
+        return true;
+    }
 
     /**
      * Read blob data through the cache provider.

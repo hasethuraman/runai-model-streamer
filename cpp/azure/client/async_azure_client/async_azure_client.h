@@ -86,7 +86,7 @@ public:
         size_t length,
         CompletionCallback callback)
     {
-        if (_cache_enabled)
+         if (_cache_enabled && _cache_loader->allow_cache_request(offset, length))
         {
             // Capture shared_ptr to loader to ensure lifetime
             auto loader = _cache_loader;

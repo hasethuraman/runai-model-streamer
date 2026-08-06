@@ -296,6 +296,17 @@ AzCacheProviderLoader::AzCacheProviderLoader(const CacheProviderConfig& config)
     if (_handle && _handle->read_fn)
     {
         _enabled = true;
+        int skip_cache_chunk_upto_length_bytes, skip_cache_header_length_bytes;
+        utils::try_getenv("RUNAI_STREAMER_AZURE_CACHE_CHUNK_UPTO_LENGTH_BYTES", skip_cache_chunk_upto_length_bytes);
+        utils::try_getenv("RUNAI_STREAMER_AZURE_CACHE_HEADER_LENGTH_BYTES", skip_cache_header_length_bytes);
+        if (skip_cache_chunk_upto_length_bytes > 0) {
+            _handle->skip_cache_chunk_upto_length_bytes = skip_cache_chunk_upto_length_bytes;
+            LOG(INFO) << "Cache chunk size set to " << _handle->skip_cache_chunk_upto_length_bytes << " bytes from environment variable RUNAI_STREAMER_AZURE_CACHE_CHUNK_UPTO_LENGTH_BYTES";
+        }
+        if (skip_cache_header_length_bytes > 0) {
+            _handle->skip_cache_header_length_bytes = skip_cache_header_length_bytes;
+            LOG(INFO) << "Cache header length set to " << _handle->skip_cache_header_length_bytes << " bytes from environment variable RUNAI_STREAMER_AZURE_CACHE_HEADER_LENGTH_BYTES";
+        }
     }
     LOG(INFO) << "AzCacheProvider: cache provider is " << (_enabled ? "enabled" : "disabled");
 }
