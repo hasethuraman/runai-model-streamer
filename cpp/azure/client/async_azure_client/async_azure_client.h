@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <future>
 #include <memory>
 #include <string>
@@ -92,8 +93,7 @@ public:
         size_t length,
         CompletionCallback callback)
     {
-        std::shared_ptr<std::atomic<unsigned>> chunk_read_counter = std::make_shared<std::atomic<unsigned>>(0);
-        int chunk_counter = chunk_read_counter->fetch_add(1);
+        int chunk_counter = _chunk_read_counter.fetch_add(1);
         if (_cache_enabled)
         {
             // Capture shared_ptr to loader to ensure lifetime
@@ -135,6 +135,7 @@ private:
     utils::ThreadPool<DownloadBlobTask> _pool;
     std::shared_ptr<AzCacheProviderLoader> _cache_loader;
     const bool _cache_enabled;
+    std::atomic<unsigned> _chunk_read_counter{0};
 };
 
 }; // namespace runai::llm::streamer::impl::azure
