@@ -10,9 +10,15 @@ namespace runai::llm::streamer::impl::azure
 {
 
 void DownloadBlobTask::execute() {
+    DirectReadPerf::instance().record(
+        DirectReadMetric::QueueDelay, DirectReadPerf::Clock::now() - queuedAt);
+    ScopedDirectReadMetric task_timer(DirectReadMetric::DownloadTask);
     try {
         taskFn();
-        callback(common::ResponseCode::Success, "");
+        {
+            ScopedDirectReadMetric callback_timer(DirectReadMetric::CompletionCallback);
+            callback(common::ResponseCode::Success, "");
+        }
     } catch (const Azure::Core::RequestFailedException& e) {
         std::string error_msg = "Azure RequestFailed: StatusCode=" + std::to_string(static_cast<int>(e.StatusCode)) + " " + e.what();
         // Map HTTP status codes to appropriate response codes
@@ -23,8 +29,10 @@ void DownloadBlobTask::execute() {
             // 416 Range Not Satisfiable - requested range is past EOF
             code = common::ResponseCode::EofError;
         }
+        ScopedDirectReadMetric callback_timer(DirectReadMetric::CompletionCallback);
         callback(code, error_msg);
     } catch (const std::exception& e) {
+        ScopedDirectReadMetric callback_timer(DirectReadMetric::CompletionCallback);
         callback(common::ResponseCode::FileAccessError, e.what());
     }
 }

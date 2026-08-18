@@ -11,6 +11,7 @@
 #include "utils/logging/logging.h"
 #include "utils/threadpool/threadpool.h"
 #include "azure/azcache_provider/azcache_provider_loader.h"
+#include "azure/client/async_azure_client/direct_read_perf.h"
 
 namespace runai::llm::streamer::impl::azure
 {
@@ -21,6 +22,7 @@ typedef std::function<void(common::ResponseCode response_code, const std::string
 struct DownloadBlobTask {
     DownloadBlobFn taskFn;
     CompletionCallback callback;
+    DirectReadPerf::Clock::time_point queuedAt = DirectReadPerf::Clock::now();
 
 public:
     void execute();
@@ -40,17 +42,23 @@ inline DownloadBlobFn createDownloadBlobFn(
     
     return [client, container, blob, buffer, offset, length]() {
         using namespace Azure::Storage::Blobs;
-        auto container_client = client->GetBlobContainerClient(container);
-        auto blob_client = container_client.GetBlockBlobClient(blob);
+        BlockBlobClient blob_client = [&]() {
+            ScopedDirectReadMetric timer(DirectReadMetric::BlobClientConstruction);
+            auto container_client = client->GetBlobContainerClient(container);
+            return container_client.GetBlockBlobClient(blob);
+        }();
         
         DownloadBlobToOptions download_options;
         download_options.Range = Azure::Core::Http::HttpRange();
         download_options.Range.Value().Offset = offset;
         download_options.Range.Value().Length = length;
         
-        blob_client.DownloadTo(
-            reinterpret_cast<uint8_t*>(buffer), length, download_options
-        );
+        {
+            ScopedDirectReadMetric timer(DirectReadMetric::DownloadTo);
+            blob_client.DownloadTo(
+                reinterpret_cast<uint8_t*>(buffer), length, download_options
+            );
+        }
     };
 }
 

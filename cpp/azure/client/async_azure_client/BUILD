@@ -1,7 +1,10 @@
 cc_library(
     name = "async_azure_client",
     srcs = ["async_azure_client.cc"],
-    hdrs = ["async_azure_client.h"],
+    hdrs = [
+        "async_azure_client.h",
+        "direct_read_perf.h",
+    ],
     visibility = ["//azure:__subpackages__"],
     deps = [
         "//azure/azcache_provider",

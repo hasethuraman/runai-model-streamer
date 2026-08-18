@@ -236,6 +236,8 @@ common::ResponseCode AzureClient::async_read(const char* path,
                                              char* destination_buffer, 
                                              common::backend_api::ObjectRequestId_t request_id)
 {
+    ScopedDirectReadMetric submit_timer(DirectReadMetric::AsyncReadSubmit);
+    DirectReadPerf::instance().request_started();
     std::shared_ptr<Responder> responder;
     {
         std::lock_guard<std::mutex> lock(_responder_mutex);
@@ -302,6 +304,7 @@ common::ResponseCode AzureClient::async_read(const char* path,
                     if (running == 1) {
                         common::backend_api::Response r(request_id, common::ResponseCode::Success);
                         responder->push(std::move(r));
+                        DirectReadPerf::instance().request_finished();
                     }
                 } else {
                     LOG(ERROR) << "Failed to download Azure blob of request " << request_id << ": " << error_msg;
@@ -310,6 +313,7 @@ common::ResponseCode AzureClient::async_read(const char* path,
                         // Propagate the specific error code from Azure SDK
                         common::backend_api::Response r(request_id, response_code);
                         responder->push(std::move(r));
+                        DirectReadPerf::instance().request_finished();
                     }
                 }
             }
