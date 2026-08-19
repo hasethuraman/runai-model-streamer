@@ -9,6 +9,8 @@
 namespace runai::llm::streamer::impl::azure
 {
 
+struct CacheMarkerPublisher;
+
 /**
  * Cache mode matching RUNAI_STREAMER_DIST pattern.
  */
@@ -45,7 +47,17 @@ struct CacheLibHandle
     void* lib_handle;
     blob_read_fn read_fn;
     shutdown_fn close_fn;  // may be nullptr if not exported
+    std::unique_ptr<CacheMarkerPublisher> marker_publisher;
     std::string lib_path;
+
+    bool initialize_markers(
+        const std::string& account,
+        const std::string& container,
+        const std::string& model);
+    void record_marker_activity(
+        const std::string& account,
+        const std::string& container,
+        const std::string& model);
 };
 
 /**
@@ -98,12 +110,20 @@ public:
               size_t offset,
               size_t length);
 
+    void initialize_markers(
+        const std::string& account,
+        const std::string& container,
+        const std::string& model);
+
     AzCacheProviderLoader(const AzCacheProviderLoader&) = delete;
     AzCacheProviderLoader& operator=(const AzCacheProviderLoader&) = delete;
 
 private:
     std::shared_ptr<CacheLibHandle> _handle;
     bool _enabled;
+    std::string _marker_account;
+    std::string _marker_container;
+    std::string _marker_model;
 
     static std::weak_ptr<CacheLibHandle> s_shared_handle;
     static std::mutex s_handle_mutex;

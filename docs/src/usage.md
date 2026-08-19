@@ -227,6 +227,12 @@ The streamer supports pluggable cache providers for Azure Blob Storage. When a c
 4. All subsequent Azure blob reads are served through the cache provider
 5. If no cache provider is installed, reads go directly to Azure Blob Storage — no regression
 
+Providers may optionally export `blob_cache_load_markers` and
+`blob_cache_push_markers`. RunAI passes the storage account, container, and
+model-prefix when the Azure client is created, then publishes markers after five
+seconds without a successful read. Pending markers are flushed when the final
+cache loader closes.
+
 ###### Disabling the cache
 
 To disable the cache provider even when it is installed, set:

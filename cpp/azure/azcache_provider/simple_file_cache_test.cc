@@ -72,6 +72,8 @@ static int has_path_traversal(const char* s)
 }
 
 static int g_closed = 0;
+static int g_marker_load_count = 0;
+static int g_marker_push_count = 0;
 
 #ifdef __cplusplus
 extern "C" {
@@ -99,6 +101,59 @@ __attribute__((visibility("default")))
 void shutdown_reset(void)
 {
     g_closed = 0;
+}
+
+__attribute__((visibility("default")))
+int blob_cache_load_markers(
+    const char* account,
+    const char* container,
+    const char* model,
+    char* error_buf,
+    size_t error_buf_size)
+{
+    if (!account || !container || !model)
+    {
+        set_error(error_buf, error_buf_size, "null marker argument");
+        return -1;
+    }
+    ++g_marker_load_count;
+    return 0;
+}
+
+__attribute__((visibility("default")))
+int blob_cache_push_markers(
+    const char* account,
+    const char* container,
+    const char* model,
+    char* error_buf,
+    size_t error_buf_size)
+{
+    if (!account || !container || !model)
+    {
+        set_error(error_buf, error_buf_size, "null marker argument");
+        return -1;
+    }
+    ++g_marker_push_count;
+    return 0;
+}
+
+__attribute__((visibility("default")))
+int marker_load_count(void)
+{
+    return g_marker_load_count;
+}
+
+__attribute__((visibility("default")))
+int marker_push_count(void)
+{
+    return g_marker_push_count;
+}
+
+__attribute__((visibility("default")))
+void marker_counts_reset(void)
+{
+    g_marker_load_count = 0;
+    g_marker_push_count = 0;
 }
 
 __attribute__((visibility("default")))

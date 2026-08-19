@@ -341,6 +341,42 @@ TEST_F(SimpleFileCacheTest, ShutdownCalledOnLastDestruction)
     dlclose(handle);
 }
 
+TEST_F(SimpleFileCacheTest, ModelMarkersLoadAndPushOnFinalLoaderDestruction)
+{
+    setenv("RUNAI_CACHE_DIR", cache_dir_.c_str(), 1);
+
+    void* handle = dlopen(so_path_.c_str(), RTLD_NOW | RTLD_LOCAL);
+    ASSERT_NE(handle, nullptr) << dlerror();
+    auto load_count_fn = reinterpret_cast<int(*)()>(dlsym(handle, "marker_load_count"));
+    auto push_count_fn = reinterpret_cast<int(*)()>(dlsym(handle, "marker_push_count"));
+    auto reset_fn = reinterpret_cast<void(*)()>(dlsym(handle, "marker_counts_reset"));
+    ASSERT_NE(load_count_fn, nullptr);
+    ASSERT_NE(push_count_fn, nullptr);
+    ASSERT_NE(reset_fn, nullptr);
+    reset_fn();
+
+    CacheProviderConfig config;
+    config.mode = CacheMode::Auto;
+    config.lib_path = so_path_.string();
+
+    {
+        auto loader = std::make_shared<AzCacheProviderLoader>(config);
+        ASSERT_TRUE(loader->is_enabled());
+        loader->initialize_markers("account", "container", "model/version");
+        EXPECT_EQ(load_count_fn(), 1);
+
+        std::vector<uint8_t> data = {1, 2, 3, 4};
+        populate_cache("container", "model/version/blob.bin", data);
+        char buffer[4];
+        EXPECT_TRUE(loader->read(
+            "account", "container", "model/version/blob.bin", buffer, 0, sizeof(buffer)));
+        EXPECT_EQ(push_count_fn(), 0);
+    }
+
+    EXPECT_EQ(push_count_fn(), 1);
+    dlclose(handle);
+}
+
 // Test the AzCacheProviderLoader with explicit config
 TEST(CacheProviderLoaderTest, DisabledModeDoesNotLoad)
 {

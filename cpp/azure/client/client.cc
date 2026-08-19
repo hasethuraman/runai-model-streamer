@@ -78,6 +78,14 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
             {
                 _endpoint_suffix = std::string(value);
             }
+            else if (strcmp(key, "cache_container") == 0)
+            {
+                _cache_container = std::string(value);
+            }
+            else if (strcmp(key, "cache_model") == 0)
+            {
+                _cache_model = std::string(value);
+            }
 #ifdef AZURITE_TESTING
             else if (strcmp(key, "connection_string") == 0)
             {
@@ -155,6 +163,14 @@ AzureClient::AzureClient(const common::backend_api::ObjectClientConfig_t& config
 
         // Create cache provider loader from environment
         auto cache_loader = AzCacheProviderLoader::from_env();
+        if (cache_loader->is_enabled() &&
+            _account_name.has_value() &&
+            _cache_container.has_value() &&
+            _cache_model.has_value())
+        {
+            cache_loader->initialize_markers(
+                _account_name.value(), _cache_container.value(), _cache_model.value());
+        }
 
         // Create async client with ThreadPool and cache loader
         _async_client = std::make_unique<AsyncAzureClient>(_blob_service_client, _client_config.max_concurrency, cache_loader);
@@ -178,6 +194,8 @@ bool AzureClient::verify_credentials(const common::backend_api::ObjectClientConf
     std::optional<std::string> temp_account_name = temp_config.account_name;
     std::optional<std::string> temp_account_key = temp_config.account_key;
     std::optional<std::string> temp_sas_token = temp_config.sas_token;
+    std::optional<std::string> temp_cache_container;
+    std::optional<std::string> temp_cache_model;
     std::string temp_endpoint_suffix = temp_config.endpoint_suffix;
 #ifdef AZURITE_TESTING
     std::optional<std::string> temp_connection_string = temp_config.connection_string;
@@ -191,6 +209,8 @@ bool AzureClient::verify_credentials(const common::backend_api::ObjectClientConf
             else if (strcmp(ptr->key, "account_key") == 0) temp_account_key = std::string(ptr->value);
             else if (strcmp(ptr->key, "sas_token") == 0) temp_sas_token = std::string(ptr->value);
             else if (strcmp(ptr->key, "endpoint_suffix") == 0) temp_endpoint_suffix = std::string(ptr->value);
+            else if (strcmp(ptr->key, "cache_container") == 0) temp_cache_container = std::string(ptr->value);
+            else if (strcmp(ptr->key, "cache_model") == 0) temp_cache_model = std::string(ptr->value);
 #ifdef AZURITE_TESTING
             else if (strcmp(ptr->key, "connection_string") == 0) temp_connection_string = std::string(ptr->value);
 #endif
@@ -202,7 +222,12 @@ bool AzureClient::verify_credentials(const common::backend_api::ObjectClientConf
         return (_connection_string == temp_connection_string);
     }
 #endif
-    return (_account_name == temp_account_name) && (_account_key == temp_account_key) && (_sas_token == temp_sas_token) && (_endpoint_suffix == temp_endpoint_suffix);
+    return (_account_name == temp_account_name) &&
+        (_account_key == temp_account_key) &&
+        (_sas_token == temp_sas_token) &&
+        (_endpoint_suffix == temp_endpoint_suffix) &&
+        (_cache_container == temp_cache_container) &&
+        (_cache_model == temp_cache_model);
 }
 
 common::backend_api::Response AzureClient::async_read_response()

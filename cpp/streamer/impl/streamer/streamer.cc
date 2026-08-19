@@ -26,6 +26,60 @@
 namespace runai::llm::streamer::impl
 {
 
+namespace
+{
+
+std::string parent_path(const std::string& path)
+{
+    const auto separator = path.find_last_of('/');
+    return separator == std::string::npos ? "" : path.substr(0, separator);
+}
+
+std::string get_azure_model_path(const std::vector<FileRanges>& request)
+{
+    if (request.empty())
+    {
+        return "";
+    }
+
+    std::string container;
+    std::string model_path;
+    for (const auto& file : request)
+    {
+        try
+        {
+            common::s3::StorageUri uri(file.path);
+            if (!uri.is_azure())
+            {
+                return "";
+            }
+            if (container.empty())
+            {
+                container = uri.bucket;
+                model_path = parent_path(uri.path);
+            }
+            else if (container != uri.bucket)
+            {
+                return "";
+            }
+
+            while (!model_path.empty() &&
+                   uri.path != model_path &&
+                   uri.path.compare(0, model_path.size() + 1, model_path + "/") != 0)
+            {
+                model_path = parent_path(model_path);
+            }
+        }
+        catch (...)
+        {
+            return "";
+        }
+    }
+    return model_path;
+}
+
+} // anonymous namespace
+
 Streamer::Streamer() : Streamer(Config())
 {}
 
@@ -253,6 +307,7 @@ common::ResponseCode Streamer::async_request(
     unsigned params_file_index = 0;
     bool has_params = false;
     common::s3::S3ClientWrapper::Params params;
+    const std::string model_path = get_azure_model_path(request);
 
     for (const auto & transfer : assigner.transfers())
     {
@@ -262,7 +317,7 @@ common::ResponseCode Streamer::async_request(
         // handle_s3 parses the URI, which would otherwise be repeated for every transfer of a file.
         if (!has_params || transfer.file_index != params_file_index)
         {
-            params = handle_s3(transfer.file_index, path);
+            params = handle_s3(transfer.file_index, path, model_path);
             params_file_index = transfer.file_index;
             has_params = true;
         }
@@ -491,7 +546,10 @@ std::shared_ptr<common::s3::StorageUri> Streamer::try_parse_uri(const std::strin
     return uri;
 }
 
-common::s3::S3ClientWrapper::Params Streamer::handle_s3(unsigned file_index, const std::string & path)
+common::s3::S3ClientWrapper::Params Streamer::handle_s3(
+    unsigned file_index,
+    const std::string & path,
+    const std::string& model_path)
 {
     auto uri = try_parse_uri(path);
 
@@ -524,7 +582,8 @@ common::s3::S3ClientWrapper::Params Streamer::handle_s3(unsigned file_index, con
 
     // Batch params carry only the URI (used by the per-read path) - no credentials. Credentials are applied
     // once, at client creation, from the streamer's credentials() (see ObjectStorageWorker::capacity).
-    return common::s3::S3ClientWrapper::Params(uri, _config->s3_block_bytesize);
+    return common::s3::S3ClientWrapper::Params(
+        uri, _config->s3_block_bytesize, model_path);
 }
 
 std::vector<std::pair<std::string, size_t>> Streamer::list_files(

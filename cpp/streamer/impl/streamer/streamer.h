@@ -99,7 +99,10 @@ struct Streamer
     common::ResponseCode lock_object_plugin(const std::vector<FileRanges> & request);
     // Build the object-storage params for a batch. Credentials are NOT included here (they are read only at
     // client creation, from credentials()); the batch params carry the URI, which is all the per-read path uses.
-    common::s3::S3ClientWrapper::Params handle_s3(unsigned file_index, const std::string & path);
+    common::s3::S3ClientWrapper::Params handle_s3(
+        unsigned file_index,
+        const std::string & path,
+        const std::string& model_path);
 
     // The streamer's credentials (empty Credentials if none set), read via _credentials_state (which locks
     // its own mutex). Called only at client-creation points (the worker's first client build, and list_files)

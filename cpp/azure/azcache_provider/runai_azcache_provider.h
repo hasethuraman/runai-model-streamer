@@ -94,6 +94,23 @@ typedef ssize_t (*blob_read_fn)(
 #define BLOB_READ_SYMBOL "blob_read"
 
 /*
+ * Optional model-marker APIs.
+ *
+ * The model argument is the versioned blob prefix containing all model files.
+ * Return 0 when marker handling is active, 1 when disabled by provider
+ * configuration, and -1 on error.
+ */
+typedef int (*blob_cache_marker_fn)(
+    const char* account,
+    const char* container,
+    const char* model,
+    char* error_buf,
+    size_t error_buf_size);
+
+#define BLOB_CACHE_LOAD_MARKERS_SYMBOL "blob_cache_load_markers"
+#define BLOB_CACHE_PUSH_MARKERS_SYMBOL "blob_cache_push_markers"
+
+/*
  * Optional: graceful shutdown of the cache provider.
  *
  * Called once when the streamer no longer needs the cache provider.

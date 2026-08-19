@@ -63,9 +63,17 @@ struct S3ClientWrapper
          Params()
          {}
 
-         Params(std::shared_ptr<StorageUri> uri, const Credentials & credentials, size_t chunk_bytesize);
+         Params(
+             std::shared_ptr<StorageUri> uri,
+             const Credentials & credentials,
+             size_t chunk_bytesize,
+             const std::string& model_path = "");
 
-         Params(std::shared_ptr<StorageUri> uri, size_t chunk_bytesize) : Params(uri, Credentials(), chunk_bytesize)
+         Params(
+             std::shared_ptr<StorageUri> uri,
+             size_t chunk_bytesize,
+             const std::string& model_path = "") :
+             Params(uri, Credentials(), chunk_bytesize, model_path)
          {}
 
          bool valid() const { return (uri.get() != nullptr); }
@@ -77,6 +85,7 @@ struct S3ClientWrapper
 
        private:
          std::string _endpoint;
+         std::string _model_path;
       };
 
       // Plugin C-ABI entry points. Resolved once (see resolve_api), because dlsym takes the process-wide

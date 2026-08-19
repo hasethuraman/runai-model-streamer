@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <cstdint>
+#include <map>
 
 #include "utils/dylib/dylib.h"
 #include "utils/random/random.h"
@@ -125,6 +126,25 @@ TEST_F(S3WrappertTest, Endpoint_In_Credentials)
 
     std::vector<common::backend_api::ObjectConfigParam_t> initial_params;
     EXPECT_EQ(params_.to_config(initial_params).endpoint_url, endpoint);
+}
+
+TEST(S3WrapperParams, AzureConfigIncludesModelMarkerContext)
+{
+    auto uri = std::make_shared<StorageUri>(
+        "az://models/model/version/weights.safetensors");
+    Credentials credentials;
+    S3ClientWrapper::Params params(uri, credentials, 8 * 1024 * 1024, "model/version");
+    std::vector<common::backend_api::ObjectConfigParam_t> initial_params;
+
+    params.to_config(initial_params);
+
+    std::map<std::string, std::string> values;
+    for (const auto& param : initial_params)
+    {
+        values[param.key] = param.value;
+    }
+    EXPECT_EQ(values["cache_container"], "models");
+    EXPECT_EQ(values["cache_model"], "model/version");
 }
 
 TEST_F(S3WrappertTest, Shutdown_Policy)
