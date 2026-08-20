@@ -8,6 +8,8 @@
 #include <memory>
 #include <functional>
 #include <cstring>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #include <azure/storage/blobs.hpp>
 #include <azure/identity/default_azure_credential.hpp>
@@ -236,6 +238,17 @@ common::ResponseCode AzureClient::async_read(const char* path,
                                              char* destination_buffer, 
                                              common::backend_api::ObjectRequestId_t request_id)
 {
+    const auto runai_worker_pid = ::getpid();
+    const auto runai_worker_tid = ::syscall(SYS_gettid);
+    const std::string file_path(path);
+    LOG(INFO) << "RunAI Azure read BEGIN"
+              << " request_id=" << request_id
+              << " file=" << file_path
+              << " offset=" << range.offset
+              << " length=" << range.length
+              << " runai_worker_pid=" << runai_worker_pid
+              << " runai_worker_tid=" << runai_worker_tid;
+
     std::shared_ptr<Responder> responder;
     {
         std::lock_guard<std::mutex> lock(_responder_mutex);
@@ -294,12 +307,20 @@ common::ResponseCode AzureClient::async_read(const char* path,
             chunk_buffer,
             chunk_offset,
             bytesize_,
-            [request_id, counter, is_success, responder](common::ResponseCode response_code, const std::string& error_msg) {
+            [request_id, counter, is_success, responder, file_path, range, runai_worker_pid, runai_worker_tid](common::ResponseCode response_code, const std::string& error_msg) {
                 if (response_code == common::ResponseCode::Success) {
                     const auto running = counter->fetch_sub(1);
                     LOG(SPAM) << "Async read request " << request_id << " succeeded - " << running << " running";
                     
                     if (running == 1) {
+                        LOG(INFO) << "RunAI Azure read END"
+                                  << " request_id=" << request_id
+                                  << " file=" << file_path
+                                  << " offset=" << range.offset
+                                  << " length=" << range.length
+                                  << " runai_worker_pid=" << runai_worker_pid
+                                  << " runai_worker_tid=" << runai_worker_tid
+                                  << " result=" << response_code;
                         common::backend_api::Response r(request_id, common::ResponseCode::Success);
                         responder->push(std::move(r));
                     }
@@ -307,6 +328,14 @@ common::ResponseCode AzureClient::async_read(const char* path,
                     LOG(ERROR) << "Failed to download Azure blob of request " << request_id << ": " << error_msg;
                     bool previous = is_success->exchange(false);
                     if (previous) {
+                        LOG(INFO) << "RunAI Azure read END"
+                                  << " request_id=" << request_id
+                                  << " file=" << file_path
+                                  << " offset=" << range.offset
+                                  << " length=" << range.length
+                                  << " runai_worker_pid=" << runai_worker_pid
+                                  << " runai_worker_tid=" << runai_worker_tid
+                                  << " result=" << response_code;
                         // Propagate the specific error code from Azure SDK
                         common::backend_api::Response r(request_id, response_code);
                         responder->push(std::move(r));
