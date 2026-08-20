@@ -33,6 +33,26 @@ Positive integer value
 
 8388608 (=8MiB) when reading from object store e.g. S3
 
+### RUNAI_STREAMER_CACHE_WINDOW_BYTESIZE
+
+> **Experimental** — This setting changes only object-storage request ordering.
+
+Enables cache-window-aware scheduling. Set it to the cache provider's prefetch
+window size in bytes. Within each backend in-flight window, RunAI submits one
+read from each distinct `(file, cache window)` before submitting another read
+from the same window. This reduces same-window contention while keeping the
+reordering bounded so prefetched data is consumed before it is evicted.
+
+The value must be at least `RUNAI_STREAMER_CHUNK_BYTESIZE`.
+
+#### Values accepted
+
+`0` to disable, or a positive integer number of bytes
+
+#### Default value
+
+`0`
+
 ### RUNAI_STREAMER_MEMORY_LIMIT
 
 Controls how the CPU Memory buffer to which tensors are read from the file is being limited. Read more about it [here](usage.md#cpu-memory-capping).
@@ -209,4 +229,3 @@ String `0` or `1`
 #### Default value
 
 `0`
-

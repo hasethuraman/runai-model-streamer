@@ -128,6 +128,71 @@ struct Submission
 
 } // namespace
 
+TEST(ObjectChunkSchedulingTest, InterleavesBoundedCacheWindowGroups)
+{
+    std::vector<char> buffers(7);
+    std::vector<ObjectChunk> chunks{
+        {1, 0, 0, 4, &buffers[0]},
+        {2, 0, 4, 4, &buffers[1]},
+        {3, 0, 8, 4, &buffers[2]},
+        {4, 0, 16, 4, &buffers[3]},
+        {5, 0, 20, 4, &buffers[4]},
+        {6, 0, 32, 4, &buffers[5]},
+        {7, 0, 36, 4, &buffers[6]},
+    };
+
+    const auto interleaved = interleave_cache_windows(std::move(chunks), 16, 2);
+
+    std::vector<size_t> offsets;
+    std::vector<common::backend_api::ObjectRequestId_t> handles;
+    for (const auto & chunk : interleaved)
+    {
+        offsets.push_back(chunk.offset);
+        handles.push_back(chunk.handle);
+    }
+
+    EXPECT_EQ(offsets, (std::vector<size_t>{0, 16, 4, 20, 8, 32, 36}));
+    EXPECT_EQ(handles, (std::vector<common::backend_api::ObjectRequestId_t>{1, 4, 2, 5, 3, 6, 7}));
+}
+
+TEST(ObjectChunkSchedulingTest, KeepsEqualOffsetsFromDifferentFilesSeparate)
+{
+    std::vector<char> buffers(4);
+    std::vector<ObjectChunk> chunks{
+        {1, 0, 0, 4, &buffers[0]},
+        {2, 0, 4, 4, &buffers[1]},
+        {3, 1, 0, 4, &buffers[2]},
+        {4, 1, 4, 4, &buffers[3]},
+    };
+
+    const auto interleaved = interleave_cache_windows(std::move(chunks), 16, 2);
+
+    std::vector<common::backend_api::ObjectRequestId_t> handles;
+    for (const auto & chunk : interleaved)
+    {
+        handles.push_back(chunk.handle);
+    }
+
+    EXPECT_EQ(handles, (std::vector<common::backend_api::ObjectRequestId_t>{1, 3, 2, 4}));
+}
+
+TEST(ObjectChunkSchedulingTest, DisabledSchedulingPreservesOrder)
+{
+    std::vector<char> buffers(3);
+    std::vector<ObjectChunk> chunks{
+        {1, 0, 0, 4, &buffers[0]},
+        {2, 0, 16, 4, &buffers[1]},
+        {3, 0, 4, 4, &buffers[2]},
+    };
+
+    const auto ordered = interleave_cache_windows(std::move(chunks), 0, 2);
+
+    ASSERT_EQ(ordered.size(), 3u);
+    EXPECT_EQ(ordered[0].handle, 1u);
+    EXPECT_EQ(ordered[1].handle, 2u);
+    EXPECT_EQ(ordered[2].handle, 3u);
+}
+
 // Fixture: owns the s3 mock handle, resets its knobs before each test, and releases the plugin's clients +
 // backend handle after each test (so state never leaks between tests). Provides build() to set up a
 // submission, and small wrappers around the mock knobs.

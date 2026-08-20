@@ -16,6 +16,63 @@
 namespace runai::llm::streamer::impl
 {
 
+std::vector<ObjectChunk> interleave_cache_windows(
+    std::vector<ObjectChunk> chunks,
+    size_t cache_window_bytesize,
+    size_t max_active_windows)
+{
+    if (cache_window_bytesize == 0 || max_active_windows < 2 || chunks.size() < 2)
+    {
+        return chunks;
+    }
+
+    struct WindowGroup
+    {
+        unsigned file_index;
+        size_t window_index;
+        std::vector<ObjectChunk> chunks;
+    };
+
+    std::vector<WindowGroup> groups;
+    for (auto & chunk : chunks)
+    {
+        const size_t window_index = chunk.offset / cache_window_bytesize;
+        if (groups.empty() ||
+            groups.back().file_index != chunk.file_index ||
+            groups.back().window_index != window_index)
+        {
+            groups.push_back(WindowGroup{chunk.file_index, window_index, {}});
+        }
+        groups.back().chunks.push_back(std::move(chunk));
+    }
+
+    std::vector<ObjectChunk> interleaved;
+    interleaved.reserve(chunks.size());
+
+    for (size_t group_begin = 0; group_begin < groups.size(); group_begin += max_active_windows)
+    {
+        const size_t group_end = std::min(groups.size(), group_begin + max_active_windows);
+        size_t chunk_index = 0;
+        bool emitted = true;
+        while (emitted)
+        {
+            emitted = false;
+            for (size_t group_index = group_begin; group_index < group_end; ++group_index)
+            {
+                auto & group = groups[group_index];
+                if (chunk_index < group.chunks.size())
+                {
+                    interleaved.push_back(std::move(group.chunks[chunk_index]));
+                    emitted = true;
+                }
+            }
+            ++chunk_index;
+        }
+    }
+
+    return interleaved;
+}
+
 ObjectStorageWorker::ObjectStorageWorker(std::function<common::s3::Credentials()> credentials_provider) :
     _credentials_provider(std::move(credentials_provider))
 {}
@@ -39,6 +96,16 @@ std::size_t ObjectStorageWorker::capacity(const Workload & first)
         const auto & batch = first.batches().front();
         _config = batch.config;
         _chunk_bytesize = std::max(static_cast<size_t>(1), _config->s3_block_bytesize);
+        _cache_window_bytesize =
+            utils::getenv<unsigned long>("RUNAI_STREAMER_CACHE_WINDOW_BYTESIZE", 0UL);
+        if (_cache_window_bytesize != 0 && _cache_window_bytesize < _chunk_bytesize)
+        {
+            LOG(WARNING) << "RUNAI_STREAMER_CACHE_WINDOW_BYTESIZE must be at least the object-storage chunk size; "
+                         << "cache-window scheduling is disabled";
+            _cache_window_bytesize = 0;
+        }
+        LOG_IF(INFO, _cache_window_bytesize != 0)
+            << "Cache-window-aware scheduling enabled with window size " << _cache_window_bytesize;
 
         // Request one completion at a time by default for prompt, per-completion window refill;
         // RUNAI_STREAMER_INTERNAL_MAX_RESPONSES can raise it (internal tuning / test knob).
@@ -153,6 +220,8 @@ void ObjectStorageWorker::enqueue(Workload && workload)
         Inflight & wl = wlit->second;
         wl.workload = std::move(workload);   // noexcept; the workload now lives in the _inflight entry
         wl.chunk_task_idx.resize(total_chunks);
+        std::vector<ObjectChunk> chunks;
+        chunks.reserve(total_chunks);
 
         size_t next_chunk = 0;
         // &batch below outlives this loop (it is stored in wl.tasks and used to route completions): the
@@ -180,7 +249,12 @@ void ObjectStorageWorker::enqueue(Workload && workload)
                 {
                     const size_t bs = std::min(remaining, _chunk_bytesize);   // last chunk is the remainder
                     wl.chunk_task_idx[next_chunk] = task_idx;
-                    _queue->enqueue(ObjectChunk{ handle_base + next_chunk, offset, bs, buffer }, 1);   // cost 1
+                    chunks.push_back(ObjectChunk{
+                        handle_base + next_chunk,
+                        batch.file_index,
+                        offset,
+                        bs,
+                        buffer});
                     ++wl.tasks[task_idx].remaining_chunks;
                     ++next_chunk;
                     offset += bs;
@@ -191,6 +265,15 @@ void ObjectStorageWorker::enqueue(Workload && workload)
         }
 
         wl.remaining_tasks = wl.tasks.size();   // total_chunks > 0 -> at least one non-zero-size task
+
+        chunks = interleave_cache_windows(
+            std::move(chunks),
+            _cache_window_bytesize,
+            _queue->capacity());
+        for (auto & chunk : chunks)
+        {
+            _queue->enqueue(std::move(chunk), 1);   // each in-flight object-storage request costs one slot
+        }
     }
     catch (...)
     {

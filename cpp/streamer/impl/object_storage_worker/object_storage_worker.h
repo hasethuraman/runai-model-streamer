@@ -27,10 +27,18 @@ namespace runai::llm::streamer::impl
 struct ObjectChunk
 {
     common::backend_api::ObjectRequestId_t handle;   // unique async handle, inside the owning workload's block
+    unsigned file_index;                             // distinguishes equal window offsets in different files
     size_t offset;                                   // absolute file offset
     size_t bytesize;                                 // chunk length
     char * buffer;                                   // destination
 };
+
+// Reorder consecutive cache-window groups in bounded round-robin batches. This keeps several distinct
+// cache windows active without traversing the whole file before returning to an earlier window.
+std::vector<ObjectChunk> interleave_cache_windows(
+    std::vector<ObjectChunk> chunks,
+    size_t cache_window_bytesize,
+    size_t max_active_windows);
 
 // ObjectStorageWorker - the per-thread worker driving the object-storage pool. It is a CapacityWorker,
 // so the base owns the in-flight window (a CapacityQueue of ObjectChunk) and runs the submit/drain
@@ -128,6 +136,7 @@ class ObjectStorageWorker : public utils::CapacityWorker<Workload, ObjectChunk>
     std::shared_ptr<Reader> _reader;         // persistent, built by capacity() on the first non-empty workload
     common::ResponseCode _reader_error = common::ResponseCode::Success;   // last client-build failure code (for discard)
     size_t _chunk_bytesize = common::s3::S3ClientWrapper::default_chunk_bytesize;   // sane object-storage default until capacity() sets it
+    size_t _cache_window_bytesize = 0;   // 0 disables cache-window-aware submission ordering
     unsigned _max_responses = 1;
 
     InflightMap _inflight;
