@@ -221,11 +221,16 @@ The streamer supports pluggable cache providers for Azure Blob Storage. When a c
 
 ###### How it works
 
-1. Install the cache provider package alongside `runai-model-streamer` (e.g., `pip install dacs-client`)
-2. At startup, the streamer auto-discovers the cache library in Python site-packages via `dladdr`
+1. Install `runai-model-streamer[azure]` or `runai-model-streamer-azure`; the Azure wheel installs [`dacs-client`](https://pypi.org/project/dacs-client/) as a dependency
+2. At startup, the streamer first tries `RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB`, if set. If unset, absent, unable to load, or incompatible with the cache ABI, it uses the auto-discovered `dacs_client/libStorageDirect.so` in Python site-packages via `dladdr`
 3. The library is loaded via `dlopen` and the `blob_read` symbol is resolved
 4. All subsequent Azure blob reads are served through the cache provider
-5. If no cache provider is installed, reads go directly to Azure Blob Storage — no regression
+5. If neither library is usable, auto mode uses the Azure SDK; required mode (`RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_ENABLED=1`) reports an error
+
+The current DACS wheels support Linux x86_64 and aarch64 with glibc 2.35 or newer.
+Their native dependencies are bundled with the wheel and resolved through its
+relative library search path; preserve the installed wheel layout rather than
+copying `libStorageDirect.so` alone. No `LD_LIBRARY_PATH` change is needed.
 
 ###### Disabling the cache
 

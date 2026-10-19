@@ -26,6 +26,7 @@ struct CacheProviderConfig
 {
     std::string lib_path;  // Path to the cache provider .so (empty = not configured)
     CacheMode mode = CacheMode::Auto;
+    std::string fallback_lib_path;  // Tried if the primary library cannot be used
 };
 
 /**
@@ -66,7 +67,10 @@ public:
     /**
      * Create a loader from environment variables:
      *   RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_ENABLED: "0", "1", or "auto" (default)
-     *   RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB: explicit .so path override
+     *   RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB: preferred .so path
+     *
+     * Prefer the explicit path; try the installed DACS client library if unset,
+     * unavailable, or incompatible.
      *
      * @throws common::Exception if mode=Required and library cannot be loaded.
      */

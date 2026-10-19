@@ -273,6 +273,54 @@ TEST_F(SimpleFileCacheTest, PathTraversalRejected)
     EXPECT_EQ(std::string(error_buf).find("path traversal"), std::string::npos);
 }
 
+TEST_F(SimpleFileCacheTest, MissingPrimaryUsesFallbackInBothModes)
+{
+    for (auto mode : {CacheMode::Auto, CacheMode::Required})
+    {
+        CacheProviderConfig config;
+        config.mode = mode;
+        config.lib_path = (cache_dir_ / "missing.so").string();
+        config.fallback_lib_path = so_path_.string();
+
+        AzCacheProviderLoader loader(config);
+        EXPECT_TRUE(loader.is_enabled());
+    }
+}
+
+TEST_F(SimpleFileCacheTest, EmptyPrimaryUsesFallback)
+{
+    CacheProviderConfig config;
+    config.mode = CacheMode::Required;
+    config.fallback_lib_path = so_path_.string();
+
+    AzCacheProviderLoader loader(config);
+    EXPECT_TRUE(loader.is_enabled());
+}
+
+TEST_F(SimpleFileCacheTest, DisabledModeIgnoresBothLibraries)
+{
+    CacheProviderConfig config;
+    config.mode = CacheMode::Disabled;
+    config.lib_path = so_path_.string();
+    config.fallback_lib_path = so_path_.string();
+
+    AzCacheProviderLoader loader(config);
+    EXPECT_FALSE(loader.is_enabled());
+}
+
+TEST_F(SimpleFileCacheTest, BothLibrariesFail)
+{
+    CacheProviderConfig config;
+    config.lib_path = (cache_dir_ / "missing-primary.so").string();
+    config.fallback_lib_path = (cache_dir_ / "missing-fallback.so").string();
+
+    AzCacheProviderLoader loader(config);
+    EXPECT_FALSE(loader.is_enabled());
+
+    config.mode = CacheMode::Required;
+    EXPECT_THROW(AzCacheProviderLoader required(config), std::exception);
+}
+
 // --- Shared handle tests ---
 
 TEST_F(SimpleFileCacheTest, SharedHandleMultipleLoadersSameLibrary)
@@ -408,6 +456,63 @@ static std::string build_test_so(const std::string& source, const std::string& n
     int ret = system(cmd.c_str());
     if (ret != 0) return "";
     return so_path.string();
+}
+
+TEST_F(SimpleFileCacheTest, PrimaryLibraryTakesPrecedenceOverFallback)
+{
+    std::string source = "#define RUNAI_CACHE_ABI_VERSION " + std::to_string(RUNAI_CACHE_ABI_VERSION) + R"(
+#include <stddef.h>
+#include <sys/types.h>
+unsigned int cache_abi_version(void) { return RUNAI_CACHE_ABI_VERSION; }
+ssize_t blob_read(const char* a, const char* c, const char* b,
+    void* buf, size_t offset, size_t length,
+    char* err, size_t err_sz) { return -1; }
+)";
+    auto fallback = build_test_so(source, "unused_fallback");
+    ASSERT_FALSE(fallback.empty());
+    setenv("RUNAI_CACHE_DIR", cache_dir_.c_str(), 1);
+    populate_cache("container", "blob", {42});
+
+    CacheProviderConfig config;
+    config.mode = CacheMode::Required;
+    config.lib_path = so_path_.string();
+    config.fallback_lib_path = fallback;
+
+    {
+        AzCacheProviderLoader loader(config);
+        EXPECT_TRUE(loader.is_enabled());
+        char byte = 0;
+        EXPECT_TRUE(loader.read("account", "container", "blob", &byte, 0, 1));
+        EXPECT_EQ(byte, 42);
+    }
+    fs::remove_all(fs::path(fallback).parent_path());
+}
+
+TEST_F(SimpleFileCacheTest, IncompatiblePrimaryUsesFallback)
+{
+    const std::vector<std::string> sources = {
+        "int unrelated(void) { return 0; }",
+        "unsigned int cache_abi_version(void) { return 999; }",
+        "unsigned int cache_abi_version(void) { return RUNAI_CACHE_ABI_VERSION; }",
+    };
+    for (size_t i = 0; i < sources.size(); ++i)
+    {
+        auto source = "#define RUNAI_CACHE_ABI_VERSION " + std::to_string(RUNAI_CACHE_ABI_VERSION)
+                      + "\n" + sources[i];
+        auto path = build_test_so(source, "fallback_primary_" + std::to_string(i));
+        ASSERT_FALSE(path.empty());
+        for (auto mode : {CacheMode::Auto, CacheMode::Required})
+        {
+            CacheProviderConfig config;
+            config.mode = mode;
+            config.lib_path = path;
+            config.fallback_lib_path = so_path_.string();
+
+            AzCacheProviderLoader loader(config);
+            EXPECT_TRUE(loader.is_enabled());
+        }
+        fs::remove_all(fs::path(path).parent_path());
+    }
 }
 
 // --- ABI version tests with CacheProviderLoader ---

@@ -240,14 +240,14 @@ std::shared_ptr<AzCacheProviderLoader> AzCacheProviderLoader::from_env()
         }
     }
 
-    // Auto-discover if no explicit path and not disabled
-    if (config.lib_path.empty() && config.mode != CacheMode::Disabled)
+    // Discover the installed DACS client as a fallback unless caching is disabled.
+    if (config.mode != CacheMode::Disabled)
     {
         std::string discovered = autodiscover_cache_lib();
         if (!discovered.empty())
         {
             LOG(INFO) << "AzCacheProvider: auto-discovered cache library: " << discovered;
-            config.lib_path = discovered;
+            config.fallback_lib_path = discovered;
         }
     }
 
@@ -263,7 +263,7 @@ AzCacheProviderLoader::AzCacheProviderLoader(const CacheProviderConfig& config)
         return;
     }
 
-    if (config.lib_path.empty())
+    if (config.lib_path.empty() && config.fallback_lib_path.empty())
     {
         if (config.mode == CacheMode::Required)
         {
@@ -278,24 +278,40 @@ AzCacheProviderLoader::AzCacheProviderLoader(const CacheProviderConfig& config)
     // Acquire or create the shared library handle
     {
         std::lock_guard<std::mutex> lock(s_handle_mutex);
-        _handle = s_shared_handle.lock();
+        const std::string paths[] = {config.lib_path, config.fallback_lib_path};
+        for (size_t i = 0; i < 2; ++i)
+        {
+            const auto& path = paths[i];
+            if (path.empty() || (i == 1 && path == config.lib_path))
+            {
+                continue;
+            }
 
-        if (_handle && _handle->lib_handle && _handle->lib_path == config.lib_path)
-        {
-            // Reuse existing handle for same library
-            LOG(DEBUG) << "AzCacheProvider: reusing shared cache library handle for " << config.lib_path;
-        }
-        else
-        {
-            // Create new handle (first loader or path changed)
-            _handle = std::make_shared<CacheLibHandle>(config.lib_path, config.mode);
-            s_shared_handle = _handle;
+            _handle = s_shared_handle.lock();
+            if (_handle && _handle->lib_handle && _handle->read_fn && _handle->lib_path == path)
+            {
+                LOG(DEBUG) << "AzCacheProvider: reusing shared cache library handle for " << path;
+            }
+            else
+            {
+                // Defer required-mode failure until both paths have been tried.
+                _handle = std::make_shared<CacheLibHandle>(path, CacheMode::Auto);
+            }
+
+            if (_handle->lib_handle && _handle->read_fn)
+            {
+                s_shared_handle = _handle;
+                _enabled = true;
+                break;
+            }
+            LOG(WARNING) << "AzCacheProvider: cannot use cache library: " << path;
         }
     }
 
-    if (_handle && _handle->read_fn)
+    if (!_enabled && config.mode == CacheMode::Required)
     {
-        _enabled = true;
+        LOG(ERROR) << "AzCacheProvider: mode=1 (required) but no compatible cache library could be loaded";
+        throw common::Exception(common::ResponseCode::InvalidParameterError);
     }
     LOG(INFO) << "AzCacheProvider: cache provider is " << (_enabled ? "enabled" : "disabled");
 }

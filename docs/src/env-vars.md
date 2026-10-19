@@ -154,7 +154,7 @@ String (e.g. `blob.core.chinacloudapi.cn`, `blob.core.usgovcloudapi.net`)
 
 > **Experimental** — This feature is under active development and may change in future releases.
 
-Controls whether the Azure Blob cache provider is enabled. When a compatible cache provider package (e.g., `dacs-client`) is installed alongside `runai-model-streamer`, the streamer auto-discovers and loads it at runtime to accelerate model loading from Azure Blob Storage via a distributed cache.
+Controls whether the Azure Blob cache provider is enabled. The Azure streamer wheel installs `dacs-client` as a dependency. The streamer first tries `RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB`, if set. If unset, missing, unable to load, or ABI-incompatible, it tries the installed `dacs_client/libStorageDirect.so` to accelerate model loading from Azure Blob Storage via a distributed cache.
 
 Set to `0` to disable the cache provider entirely, even if the package is installed. This is the recommended way to disable caching in case of issues.
 
@@ -166,7 +166,19 @@ See [Azure Blob Cache Provider (Experimental)](usage.md#azure-blob-cache-provide
 
 #### Default value
 
-Unset — cache is auto-enabled when a compatible cache provider package is installed
+Unset — cache is auto-enabled when a compatible cache library is available; otherwise reads use the Azure SDK. Set to `1` to require a usable cache library and report an error if neither the explicit path nor the installed package works.
+
+### RUNAI_STREAMER_EXPERIMENTAL_AZURE_CACHE_LIB
+
+Preferred cache-provider shared library path. This path takes precedence over the installed DACS client library. If unset, absent, unable to load, or incompatible with the cache ABI, the streamer falls back to the installed package library. It is ignored when caching is disabled.
+
+#### Values accepted
+
+Shared library path (e.g. `/opt/cache-client/dacs_client/libStorageDirect.so`)
+
+#### Default value
+
+Unset — use the installed DACS client library
 
 ### RUNAI_STREAMER_DIST
 
@@ -209,4 +221,3 @@ String `0` or `1`
 #### Default value
 
 `0`
-

@@ -24,6 +24,6 @@ setup(
     version=VERSION,
     license_files=("LICENSE",),
     packages=find_packages(),
-    install_requires=["azure-storage-blob", "azure-identity"],
+    install_requires=["azure-storage-blob", "azure-identity", "dacs-client>=0.1.0a2,<0.2"],
     data_files=[("/runai_model_streamer/libstreamer/lib/", [LIB])],
 )
