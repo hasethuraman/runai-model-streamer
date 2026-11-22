@@ -232,6 +232,9 @@ class FileStreamer:
         self.requests_iterator: FilesRequestsIteratorWithBuffer = FilesRequestsIteratorWithBuffer.with_memory_mode(
             file_stream_requests, memory_limit, direct_block, owned and self.device_str == "cpu"
         )
+        from runai_model_streamer import _cpu_diagnostics
+
+        _cpu_diagnostics.ownership(self.device_str, owned, False)
         self.live_requests = {}
         self.outstanding = 0
 

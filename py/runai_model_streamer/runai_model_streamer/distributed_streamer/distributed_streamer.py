@@ -437,6 +437,9 @@ class _distributedStreamer:
 
         self.device = torch.device(device)
         self.owned = owned
+        from runai_model_streamer import _cpu_diagnostics
+
+        _cpu_diagnostics.ownership(self.device, owned, True)
         self.my_global_rank = params.my_global_rank
         self.groups_by_ranks = params.groups_by_ranks
         self.broadcast_timeout = params.broadcast_timeout
@@ -638,7 +641,9 @@ class _distributedStreamer:
         usable on every other, and that layout is unchanged. What a caller needs is alignment for the
         dtype, which SafetensorsStreamer checks on every tensor whatever path produced it.
         """
-        return buffer.clone()
+        from runai_model_streamer import _cpu_diagnostics
+
+        return _cpu_diagnostics.clone(buffer, "distributed_owned")
 
     def prefill(self,
                 chunk_gen: Iterator,

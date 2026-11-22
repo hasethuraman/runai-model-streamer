@@ -398,7 +398,9 @@ class SafetensorsStreamer:
             # have had to interpret the address this is here to avoid. Only what has to be copied is,
             # so a model whose tensors all sit where their dtypes can use them pays nothing.
             if safetensors_pytorch.requires_alignment_copy(buffer, tensor_metadata):
-                buffer = buffer.clone()
+                from runai_model_streamer import _cpu_diagnostics
+
+                buffer = _cpu_diagnostics.clone(buffer, "alignment")
                 self.unaligned_copies += 1
 
             tensor = safetensors_pytorch.create_torch_tensor(buffer, tensor_metadata)
@@ -419,3 +421,6 @@ class SafetensorsStreamer:
         # All tensors delivered (the underlying get_chunks() is exhausted). Log the session throughput here,
         # during active consumption while the logging system is still alive.
         self._log_throughput()
+        from runai_model_streamer import _cpu_diagnostics
+
+        _cpu_diagnostics.flush()
