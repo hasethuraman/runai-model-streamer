@@ -4,6 +4,8 @@
 import importlib.util
 import json
 import os
+import sys
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -100,6 +102,46 @@ class CpuDiagnosticsTests(unittest.TestCase):
         self.assertEqual(module._pending, [])
         self.assertEqual(module._totals, {})
         self.assertEqual(next(module._sequence), 0)
+
+    def test_more_than_64_operations_do_not_format_or_write_until_flush(self):
+        module = load_diagnostics(True)
+        source = Buffer([1])
+        with (
+            mock.patch.object(module.os, "write") as write,
+            mock.patch.object(module.json, "dumps") as dumps,
+        ):
+            for _ in range(100):
+                module.clone(source, "alignment")
+            write.assert_not_called()
+            dumps.assert_not_called()
+        self.assertEqual(source.clones, 100)
+        self.assertEqual(len(module._pending), 100)
+        with mock.patch.object(module.os, "write", side_effect=lambda _, p: len(p)):
+            module.flush()
+        self.assertEqual(module._pending, [])
+
+    def test_capacity_failure_does_not_silently_discard_records(self):
+        module = load_diagnostics(True)
+        module._capacity = 1
+        module.ownership("cpu", True, False)
+        with self.assertRaisesRegex(BufferError, "capacity exceeded"):
+            module.ownership("cpu", True, False)
+        self.assertEqual(len(module._pending), 1)
+
+    def test_lifecycle_flush_dumps_the_actual_torch_libgomp(self):
+        module = load_diagnostics(True)
+        torch = types.SimpleNamespace(__file__="/runtime/torch/__init__.py")
+        with (
+            mock.patch.dict(os.environ, {"LIBGOMP_CPU_DIAGNOSTICS": "1"}),
+            mock.patch.dict(sys.modules, {"torch": torch}),
+            mock.patch("ctypes.CDLL") as load,
+            mock.patch.object(module.os, "write", side_effect=lambda _, p: len(p)),
+        ):
+            module.flush()
+        load.assert_called_once_with("/runtime/torch/lib/libgomp.so.1")
+        load.return_value.GOMP_cpu_diagnostics_flush.assert_called_once_with()
+        self.assertEqual(load.return_value.GOMP_cpu_diagnostics_flush.argtypes, [])
+        self.assertIsNone(load.return_value.GOMP_cpu_diagnostics_flush.restype)
 
 
 if __name__ == "__main__":

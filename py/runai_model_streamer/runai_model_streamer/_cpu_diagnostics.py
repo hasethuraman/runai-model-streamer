@@ -1,7 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Opt-in caller CPU measurements; OpenMP worker CPU is measured separately."""
+"""Buffer opt-in caller CPU measurements; flush only at the existing close path.
+
+OpenMP worker CPU is separate. Enabled libgomp diagnostics are flushed from
+Torch's actual library here too, before process termination can discard them.
+"""
 
 import itertools
 import json
@@ -15,6 +19,7 @@ _lock = threading.Lock()
 _sequence = itertools.count()
 _pending = []
 _totals = {}
+_capacity = 65536
 
 
 def _after_fork():
@@ -39,10 +44,9 @@ def _emit(records):
 
 def _record(record):
     with _lock:
+        if len(_pending) >= _capacity:
+            raise BufferError("RunAI CPU diagnostic capacity exceeded; flush required")
         _pending.append(record)
-        if len(_pending) >= 64:
-            _emit(_pending)
-            _pending.clear()
 
 
 def ownership(device, owned, distributed):
@@ -122,3 +126,15 @@ def flush():
                 }
             ]
         )
+    if os.environ.get("LIBGOMP_CPU_DIAGNOSTICS") == "1":
+        import ctypes
+
+        import torch
+
+        library = ctypes.CDLL(
+            os.path.join(os.path.dirname(torch.__file__), "lib", "libgomp.so.1")
+        )
+        dump = library.GOMP_cpu_diagnostics_flush
+        dump.argtypes = []
+        dump.restype = None
+        dump()
