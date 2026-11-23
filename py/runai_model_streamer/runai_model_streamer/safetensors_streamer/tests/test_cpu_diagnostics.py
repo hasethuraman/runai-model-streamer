@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -39,6 +40,67 @@ class Buffer:
 
 
 class CpuDiagnosticsTests(unittest.TestCase):
+    def test_spans_preserve_call_failure_and_generator_close(self):
+        module = load_diagnostics(True)
+        with module.span("submission") as record:
+            record["submission_id"] = 7
+        with self.assertRaisesRegex(ValueError, "native-call-failed"):
+            with module.span("response_wait"):
+                raise ValueError("native-call-failed")
+
+        def consumer():
+            with module.span("consumer_handoff"):
+                yield 7
+
+        generator = consumer()
+        self.assertEqual(next(generator), 7)
+        generator.close()
+        self.assertEqual([row["success"] for row in module._pending], [True, False, False])
+        self.assertEqual(module._pending[0]["submission_id"], 7)
+        self.assertTrue(all(row["caller_cpu_ns"] >= 0 for row in module._pending))
+
+    def test_disabled_spans_and_boundaries_do_not_read_cpu_or_emit(self):
+        module = load_diagnostics(False)
+        with mock.patch.object(module.time, "clock_gettime_ns") as clock:
+            with module.span("submission") as record:
+                record["submission_id"] = 7
+            module.boundary("stream_start")
+            module.boundary("stream_end")
+        clock.assert_not_called()
+        self.assertEqual(module._pending, [])
+
+    def test_scheduler_gate_rejects_foreign_proof_and_times_out_before_streaming(self):
+        module = load_diagnostics(True)
+        token = "ab" * 16
+        with tempfile.TemporaryDirectory() as folder:
+            for mode in ("success", "foreign", "timeout"):
+                root = Path(folder) / mode
+                with (
+                    mock.patch.dict(os.environ, {
+                        "RUNAI_CPU_DIAGNOSTICS_SCHEDULER_GATE": "1",
+                        "RUNAI_CPU_DIAGNOSTICS_SCHEDULER_TOKEN": token,
+                    }),
+                    mock.patch.object(module, "Path", return_value=root),
+                ):
+                    if mode == "timeout":
+                        with mock.patch.object(module.time, "monotonic", side_effect=[0, 61]):
+                            with self.assertRaises(TimeoutError):
+                                module.scheduler_gate()
+                    else:
+                        def ready(delay):
+                            (root / "ready.json").write_text(json.dumps({
+                                "version": 1, "pid": os.getpid(), "links": 11,
+                                "token": token if mode == "success" else "cd" * 16,
+                            }))
+
+                        with mock.patch.object(module.time, "sleep", side_effect=ready):
+                            if mode == "foreign":
+                                with self.assertRaisesRegex(ValueError, "ownership mismatch"):
+                                    module.scheduler_gate()
+                            else:
+                                module.scheduler_gate()
+                    self.assertEqual(json.loads((root / "waiting.json").read_text())["token"], token)
+
     def test_disabled_preserves_one_clone_and_retained_ownership(self):
         module = load_diagnostics(False)
         source = Buffer([1, 2])

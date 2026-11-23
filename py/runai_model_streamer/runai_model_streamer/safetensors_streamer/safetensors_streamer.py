@@ -232,6 +232,9 @@ class SafetensorsStreamer:
             return
         size = self.total_size
         elapsed_time = timer() - self.start_time
+        from runai_model_streamer import _cpu_diagnostics
+
+        _cpu_diagnostics.boundary("stream_end")
         throughput = size / elapsed_time if elapsed_time > 0 else 0
         logger.info(
             f"[RunAI Streamer] Overall time to stream {humanize.naturalsize(size, binary=True)} of all files to {self.device_str}: {round(elapsed_time, 2)}s, {humanize.naturalsize(throughput, binary=True)}/s"
@@ -306,6 +309,9 @@ class SafetensorsStreamer:
         # Start the throughput clock here, right before the first submission: prepare_request issues the
         # metadata reads (the first submissions), so the measurement spans first submission -> last response.
         self.start_time = timer()
+        from runai_model_streamer import _cpu_diagnostics
+
+        _cpu_diagnostics.boundary("stream_start")
 
         # metadata is created on cpu and each process reads it individually
         safetensors_metadatas = safetensors_pytorch.prepare_request(

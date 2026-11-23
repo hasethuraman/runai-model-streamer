@@ -32,6 +32,8 @@ import torch
 
 import logging
 
+from runai_model_streamer import _cpu_diagnostics
+
 logger = logging.getLogger(__name__)
 
 s3_credentials_module = get_s3_credentials_module()
@@ -232,8 +234,6 @@ class FileStreamer:
         self.requests_iterator: FilesRequestsIteratorWithBuffer = FilesRequestsIteratorWithBuffer.with_memory_mode(
             file_stream_requests, memory_limit, direct_block, owned and self.device_str == "cpu"
         )
-        from runai_model_streamer import _cpu_diagnostics
-
         _cpu_diagnostics.ownership(self.device_str, owned, False)
         self.live_requests = {}
         self.outstanding = 0
@@ -266,14 +266,16 @@ class FileStreamer:
             if request is None:
                 return    # no data left to submit; the live submissions still have to be drained
 
-            submission_id = runai_request(
-                self.streamer,
-                [file_request.path for file_request in request.files],
-                [len(file_request.sizes) for file_request in request.files],
-                [offset for file_request in request.files for offset in file_request.offsets],
-                [size for file_request in request.files for size in file_request.sizes],
-                request.range_dsts,
-            )
+            with _cpu_diagnostics.span("submission") as observation:
+                submission_id = runai_request(
+                    self.streamer,
+                    [file_request.path for file_request in request.files],
+                    [len(file_request.sizes) for file_request in request.files],
+                    [offset for file_request in request.files for offset in file_request.offsets],
+                    [size for file_request in request.files for size in file_request.sizes],
+                    request.range_dsts,
+                )
+                observation["submission_id"] = submission_id
             self.live_requests[submission_id] = request
             self.outstanding += request.num_ranges
 
@@ -288,7 +290,10 @@ class FileStreamer:
             while self.live_requests:
                 # runai_response blocks indefinitely (timeout 0) and returns None only on teardown. It
                 # serves whichever submission completed a range first, so responses INTERLEAVE.
-                response = runai_response(self.streamer)
+                with _cpu_diagnostics.span("response_wait") as observation:
+                    response = runai_response(self.streamer)
+                    if response is not None:
+                        observation["submission_id"] = response[1]
                 if response is None:
                     return    # teardown: no further responses are coming
                 ret, submission_id, file_relative_index, range_relative_index, submission_done = response
@@ -320,11 +325,13 @@ class FileStreamer:
                 # currently file streamer is always reading a cpu buffer
                 # so we don't need to move the tensor to the device
                 # for future GDS/CUDA support we will need to move the tensor to the device (cpu or different device)
-                if self.device_str == "cpu":
-                    yield file_id, range_index, tensor
-                else:
-                    device_tensor = tensor.to(self.device_str)
-                    yield file_id, range_index, device_tensor
+                with _cpu_diagnostics.span("consumer_handoff") as observation:
+                    observation["submission_id"] = submission_id
+                    if self.device_str == "cpu":
+                        yield file_id, range_index, tensor
+                    else:
+                        device_tensor = tensor.to(self.device_str)
+                        yield file_id, range_index, device_tensor
 
                 # Resumed past the yield, so the consumer is done with this tensor. If it was the
                 # submission's last response, every view into its buffer has now been consumed - which
