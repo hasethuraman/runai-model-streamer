@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Buffer opt-in caller CPU measurements; flush only at the existing close path.
+"""Buffer opt-in stream measurements; flush only at the existing close path.
 
-OpenMP worker CPU is separate. Enabled libgomp diagnostics are flushed from
+Clones record host latency only. Span and OpenMP worker CPU remain separate.
+Enabled libgomp diagnostics are flushed from
 Torch's actual library here too, before process termination can discard them.
 """
 
@@ -153,22 +154,19 @@ def clone(buffer, kind):
     device = str(buffer.device)
     tid = threading.get_native_id()
     start = time.monotonic_ns()
-    cpu_start = time.clock_gettime_ns(time.CLOCK_THREAD_CPUTIME_ID)
     success = False
     try:
         result = buffer.clone()
         success = True
         return result
     finally:
-        cpu = time.clock_gettime_ns(time.CLOCK_THREAD_CPUTIME_ID) - cpu_start
         end = time.monotonic_ns()
         with _lock:
             total = _totals.setdefault(
-                kind, {"calls": 0, "bytes": 0, "cpu_ns": 0, "wall_ns": 0, "failures": 0}
+                kind, {"calls": 0, "bytes": 0, "wall_ns": 0, "failures": 0}
             )
             total["calls"] += 1
             total["bytes"] += size
-            total["cpu_ns"] += cpu
             total["wall_ns"] += end - start
             total["failures"] += not success
         _record(
@@ -182,7 +180,6 @@ def clone(buffer, kind):
                 "bytes": size,
                 "start_ns": start,
                 "end_ns": end,
-                "caller_cpu_ns": cpu,
                 "success": success,
             }
         )
@@ -202,8 +199,7 @@ def flush():
                     "tid": threading.get_native_id(),
                     "monotonic_ns": time.monotonic_ns(),
                     "totals": _totals,
-                    "cpu_scope": "calling-thread-only",
-                    "openmp_worker_cpu_included": False,
+                    "clone_cpu_collected": False,
                 }
             ]
         )

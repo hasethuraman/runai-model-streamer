@@ -104,50 +104,66 @@ class CpuDiagnosticsTests(unittest.TestCase):
     def test_disabled_preserves_one_clone_and_retained_ownership(self):
         module = load_diagnostics(False)
         source = Buffer([1, 2])
-        with mock.patch.object(module.os, "write") as write:
+        with (
+            mock.patch.object(module.os, "write") as write,
+            mock.patch.object(module.time, "clock_gettime_ns") as clock,
+        ):
             owned = module.clone(source, "distributed_owned")
             source.values[0] = 9
             module.flush()
         self.assertEqual(source.clones, 1)
         self.assertEqual(owned.values, [1, 2])
         write.assert_not_called()
+        clock.assert_not_called()
 
-    def test_enabled_preserves_clone_and_separates_caller_cpu(self):
-        module = load_diagnostics(True)
-        records = []
+    def test_enabled_preserves_clone_without_cpu_sampling(self):
+        for kind in ("distributed_owned", "alignment"):
+            with self.subTest(kind=kind):
+                module = load_diagnostics(True)
+                records = []
 
-        def write(_descriptor, payload):
-            records.append(json.loads(payload.decode().split(" ", 1)[1]))
-            return len(payload)
+                def write(_descriptor, payload):
+                    records.append(json.loads(payload.decode().split(" ", 1)[1]))
+                    return len(payload)
 
-        source = Buffer([1, 2])
-        with mock.patch.object(module.os, "write", side_effect=write):
-            module.ownership("cpu", True, False)
-            owned = module.clone(source, "alignment")
-            source.values[0] = 9
-            module.flush()
-        self.assertEqual(owned.values, [1, 2])
-        self.assertEqual(source.clones, 1)
-        self.assertEqual(
-            [item["event"] for item in records], ["ownership", "clone", "summary"]
-        )
-        clone = records[1]
-        self.assertEqual(clone["bytes"], 8)
-        self.assertTrue(clone["success"])
-        self.assertGreaterEqual(clone["caller_cpu_ns"], 0)
-        self.assertGreater(clone["end_ns"], clone["start_ns"])
-        self.assertLessEqual(
-            clone["caller_cpu_ns"], clone["end_ns"] - clone["start_ns"]
-        )
-        self.assertFalse(records[2]["openmp_worker_cpu_included"])
+                source = Buffer([1, 2])
+                with (
+                    mock.patch.object(module.os, "write", side_effect=write),
+                    mock.patch.object(module.time, "clock_gettime_ns") as clock,
+                ):
+                    module.ownership("cpu", True, False)
+                    owned = module.clone(source, kind)
+                    source.values[0] = 9
+                    module.flush()
+                clock.assert_not_called()
+                self.assertEqual(owned.values, [1, 2])
+                self.assertEqual(source.clones, 1)
+                self.assertEqual(
+                    [item["event"] for item in records], ["ownership", "clone", "summary"]
+                )
+                clone = records[1]
+                self.assertEqual(clone["bytes"], 8)
+                self.assertTrue(clone["success"])
+                self.assertGreater(clone["end_ns"], clone["start_ns"])
+                self.assertNotIn("caller_cpu_ns", clone)
+                self.assertFalse(records[2]["clone_cpu_collected"])
+                self.assertEqual(records[2]["totals"][kind], {
+                    "calls": 1, "bytes": 8,
+                    "wall_ns": clone["end_ns"] - clone["start_ns"], "failures": 0,
+                })
 
     def test_failed_clone_propagates_and_is_not_reported_as_success(self):
         module = load_diagnostics(True)
         source = Buffer([1])
-        with mock.patch.object(source, "clone", side_effect=ValueError("clone failed")):
+        with (
+            mock.patch.object(source, "clone", side_effect=ValueError("clone failed")),
+            mock.patch.object(module.time, "clock_gettime_ns") as clock,
+        ):
             with self.assertRaisesRegex(ValueError, "clone failed"):
                 module.clone(source, "distributed_owned")
+        clock.assert_not_called()
         self.assertFalse(module._pending[0]["success"])
+        self.assertNotIn("caller_cpu_ns", module._pending[0])
         self.assertEqual(module._totals["distributed_owned"]["failures"], 1)
 
     def test_diagnostic_delivery_failure_is_explicit(self):
